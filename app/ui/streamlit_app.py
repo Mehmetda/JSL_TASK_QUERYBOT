@@ -17,21 +17,33 @@ st.set_page_config(page_title="Medical QueryBot", layout="wide")
 
 # Sidebar
 with st.sidebar:
-    # John Snow LABS Logo
+    # John Snow LABS Logo - Enhanced
     try:
-        st.image("app/assets/images.png", width=150)
-    except:
-        st.markdown("### 🏥 John Snow LABS")
+        # Use absolute path and better image display
+        logo_path = os.path.join(project_root, "app", "assets", "images.png")
+        if os.path.exists(logo_path):
+            st.image(logo_path, width=200, use_container_width=False)
+        else:
+            # Fallback with styled text
+            st.markdown("""
+            <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                       border-radius: 10px; margin-bottom: 20px;">
+                <h2 style="color: white; margin: 0; font-family: 'Arial', sans-serif; font-weight: bold;">
+                    🧬 John Snow LABS
+                </h2>
+            </div>
+            """, unsafe_allow_html=True)
+    except Exception as e:
+        # Enhanced fallback
+        st.markdown("""
+        <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                   border-radius: 10px; margin-bottom: 20px;">
+            <h2 style="color: white; margin: 0; font-family: 'Arial', sans-serif; font-weight: bold;">
+                🧬 John Snow LABS
+            </h2>
+        </div>
+        """, unsafe_allow_html=True)
     
-    st.markdown("### Choose LLM Type")
-    llm_type = st.selectbox("LLM Type", ["gpt-4o", "gpt-4", "gpt-3.5-turbo"], index=0, label_visibility="collapsed")
-    
-    st.markdown("### RAG Settings")
-    st.markdown("**Select Top K values**")
-    top_k = st.slider("Top K", 1, 50, 5, label_visibility="collapsed")
-    
-    st.markdown("**Select Score Threshold**")
-    score_threshold = st.slider("Score Threshold", 0.10, 1.00, 0.30, label_visibility="collapsed")
 
 # Main content
 st.markdown("<h1 style='text-align:center;margin-top:0;'>Medical QueryBot</h1>", unsafe_allow_html=True)
@@ -103,11 +115,6 @@ if st.button("Submit", type="primary") and question.strip():
                 st.markdown("### 🗄️ Tables Used")
                 st.write(", ".join(tables))
             
-            # Sample Data
-            sample_data = meta.get("results", {}).get("sample_data", [])
-            if sample_data:
-                st.markdown("### 📋 Sample Data (First 3 rows)")
-                st.write(sample_data)
             
             # Full metadata (collapsible)
             with st.expander("🔧 Raw Metadata"):

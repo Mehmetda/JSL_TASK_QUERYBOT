@@ -2,11 +2,17 @@
 Main pipeline for QueryBot
 """
 import re
+import logging
 from app.agents.sql_agent import generate_sql
 from app.tools.sql_executor import execute_sql
 from app.tools.answer_summarizer import summarize_results
 from app.db.connection import get_connection
 from app.tools.sql_validator import validate_sql
+
+
+# Basic logging configuration
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s - %(name)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 
 def extract_tables_from_sql(sql: str) -> list:
@@ -77,30 +83,42 @@ def run_query_pipeline(question: str) -> dict:
     
     try:
         # Generate SQL with dynamic schema
+        logger.info("Generating SQL for question")
         sql = generate_sql(question, conn)
         
         # Validate SQL
+        logger.info("Validating generated SQL")
         validation_result = validate_sql(conn, sql)
         if not validation_result["is_valid"]:
-            return {
-                "sql": sql,
-                "answer": "",
-                "meta": {"validation": validation_result}
-            }
+            # One-time retry with guidance appended to the question
+            logger.warning("SQL validation failed, attempting one-time retry with guidance")
+            retry_question = (
+                question
+                + "\n(Not: Tek bir SELECT ifadesi üret, noktalı virgül kullanma, mevcut şemaya uygun sütun ve tablo isimlerini kullan.)"
+            )
+            sql = generate_sql(retry_question, conn)
+            validation_result = validate_sql(conn, sql)
+            if not validation_result["is_valid"]:
+                logger.error("Retry validation also failed")
+                return {
+                    "sql": sql,
+                    "answer": "",
+                    "meta": {"validation": validation_result}
+                }
         
         # Execute SQL
+        logger.info("Executing SQL")
         rows, meta = execute_sql(conn, sql)
         
         # Summarize results
+        logger.info("Summarizing results")
         answer = summarize_results(question, rows)
         
         # Prepare enhanced metadata (without question and sql_generated)
         enhanced_meta = {
             "results": {
                 "row_count": len(rows),
-                "columns": meta.get("columns", []),
-                "data_types": meta.get("data_types", []),
-                "sample_data": rows[:3] if rows else []  # First 3 rows as sample
+                "columns": meta.get("columns", [])
             },
             "validation": {
                 "is_valid": validation_result["is_valid"],
@@ -119,13 +137,16 @@ def run_query_pipeline(question: str) -> dict:
             }
         }
         
-        return {
+        result = {
             "sql": sql,
             "answer": answer,
             "meta": enhanced_meta
         }
+        logger.info("Pipeline completed successfully")
+        return result
         
     except Exception as e:
+        logger.exception("Pipeline failed with an unhandled exception")
         return {
             "sql": "",
             "answer": f"Hata oluştu: {str(e)}",
