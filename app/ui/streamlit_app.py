@@ -88,6 +88,11 @@ if st.button("Submit", type="primary") and question.strip():
                 st.metric("Complexity", meta.get("database", {}).get("complexity", "N/A"))
             with col3:
                 st.metric("Tables Used", len(meta.get("database", {}).get("tables_used", [])))
+            # Relevant schema snippet
+            relevant = meta.get("database", {}).get("relevant_schema")
+            if relevant:
+                st.markdown("### 🔎 Relevant Schema (Auto‑selected)")
+                st.code(relevant)
             
             # Results Information
             st.markdown("### 📈 Results Information")
@@ -97,7 +102,22 @@ if st.button("Submit", type="primary") and question.strip():
             with col2:
                 st.metric("Columns Returned", meta.get("results", {}).get("columns_returned", 0))
             with col3:
-                st.metric("Data Size", meta.get("performance", {}).get("data_size_estimate", "N/A"))
+                perf = meta.get("performance", {})
+                st.metric("Exec Time (ms)", perf.get("execution_ms", "N/A"))
+                st.caption(f"Data Size: {perf.get('data_size_estimate', 'N/A')}")
+
+            # Tokens (if available)
+            tokens = meta.get("performance", {}).get("tokens", {})
+            if tokens:
+                st.markdown("### 🧮 Token Usage")
+                tc1, tc2, tc3 = st.columns(3)
+                with tc1:
+                    st.metric("SQL Gen Tokens", tokens.get("sql_generation", 0))
+                with tc2:
+                    st.metric("Answer Tokens", tokens.get("answer_summarization", 0))
+                with tc3:
+                    total = int(tokens.get("sql_generation", 0)) + int(tokens.get("answer_summarization", 0))
+                    st.metric("Total Tokens", total)
             
             # Validation Status
             st.markdown("### ✅ Validation Status")
@@ -108,6 +128,8 @@ if st.button("Submit", type="primary") and question.strip():
                 st.error(f"❌ SQL Safety: {validation.get('sql_safety', 'N/A')}")
                 if validation.get("error"):
                     st.error(f"Error: {validation['error']}")
+            if validation.get("retried"):
+                st.info("🔁 Sorgu ilk denemede geçmedi, hata bağlamıyla otomatik yeniden denendi.")
             
             # Tables Used
             tables = meta.get("database", {}).get("tables_used", [])

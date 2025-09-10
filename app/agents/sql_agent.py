@@ -5,15 +5,18 @@ import os
 import sqlite3
 from openai import OpenAI
 from app.db.connection import get_connection
-from app.agents.system_prompt import get_enhanced_system_prompt
+from app.agents.system_prompt import get_contextual_system_prompt
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# last LLM usage (for metrics)
+LAST_LLM_USAGE = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
 def generate_sql_with_llm(question: str, conn: sqlite3.Connection) -> str:
     """Generate SQL using OpenAI LLM with dynamic schema"""
     try:
-        system_prompt = get_enhanced_system_prompt(conn)
+        system_prompt = get_contextual_system_prompt(conn, question)
         
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -24,6 +27,17 @@ def generate_sql_with_llm(question: str, conn: sqlite3.Connection) -> str:
             max_tokens=300,
             temperature=0.1
         )
+        # capture usage for token metrics
+        try:
+            usage = response.usage
+            if usage is not None:
+                LAST_LLM_USAGE.update({
+                    "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                    "completion_tokens": getattr(usage, "completion_tokens", 0),
+                    "total_tokens": getattr(usage, "total_tokens", 0),
+                })
+        except Exception:
+            pass
         
         sql_query = response.choices[0].message.content.strip()
         

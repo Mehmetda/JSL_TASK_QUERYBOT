@@ -8,6 +8,9 @@ from openai import OpenAI
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Expose last usage for metrics
+LAST_SUMMARY_USAGE = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
 
 def format_data_for_llm(rows: List[Tuple[Any, ...]]) -> str:
     """Format SQL results for LLM processing"""
@@ -66,7 +69,18 @@ Cevap:"""
             max_tokens=300,
             temperature=0.3
         )
-        
+        # capture usage
+        try:
+            usage = response.usage
+            if usage is not None:
+                LAST_SUMMARY_USAGE.update({
+                    "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                    "completion_tokens": getattr(usage, "completion_tokens", 0),
+                    "total_tokens": getattr(usage, "total_tokens", 0),
+                })
+        except Exception:
+            pass
+
         return response.choices[0].message.content.strip()
         
     except Exception as e:
