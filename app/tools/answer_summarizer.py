@@ -4,9 +4,10 @@ Answer summarization module using LLM
 import os
 import json
 from typing import List, Tuple, Any
-from openai import OpenAI
+from app.llm.llm_manager import get_llm_manager
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Use LLM manager for flexible LLM selection
+llm_manager = get_llm_manager()
 
 # Expose last usage for metrics
 LAST_SUMMARY_USAGE = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -60,8 +61,7 @@ Lütfen cevabı şu formatta ver:
 Cevap:"""
 
         # Call LLM
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+        response = llm_manager.generate_response(
             messages=[
                 {"role": "system", "content": "Sen bir tıbbi veritabanı uzmanısın. Veritabanı sonuçlarını analiz edip kullanıcıya anlamlı cevaplar veriyorsun."},
                 {"role": "user", "content": prompt}
@@ -71,17 +71,23 @@ Cevap:"""
         )
         # capture usage
         try:
-            usage = response.usage
-            if usage is not None:
+            usage = response.get("usage", {})
+            if usage:
                 LAST_SUMMARY_USAGE.update({
-                    "prompt_tokens": getattr(usage, "prompt_tokens", 0),
-                    "completion_tokens": getattr(usage, "completion_tokens", 0),
-                    "total_tokens": getattr(usage, "total_tokens", 0),
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "completion_tokens": usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
                 })
         except Exception:
             pass
 
-        return response.choices[0].message.content.strip()
+        content = response.get("content", "").strip()
+        
+        # If content is empty, provide a fallback answer
+        if not content:
+            return f"Veritabanında {len(rows)} kayıt bulunmaktadır. Detaylı analiz için LLM yanıtı alınamadı."
+        
+        return content
         
     except Exception as e:
         print(f"LLM Error in summarization: {e}")

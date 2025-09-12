@@ -2,14 +2,14 @@
 Quick test script for minimal RAG (keyword top-K schema) and prompt integration.
 
 Run:
-  python test_rag_schema.py
+  python tests/test_rag_schema.py
 """
 import sys
 from pathlib import Path
 
-# Ensure project root on sys.path
+# Add project root to Python path
 CURRENT = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT
+PROJECT_ROOT = CURRENT.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.db.connection import get_connection
@@ -48,5 +48,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

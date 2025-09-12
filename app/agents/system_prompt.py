@@ -3,12 +3,71 @@ Dynamic System Prompt Generator for Medical QueryBot
 """
 import sqlite3
 from typing import Dict, List, Any
-import re
-import os
-from openai import OpenAI
+from math import sqrt
+
+# Lazy embedding model holder
+_embedding_model = None
+
+def _get_embedding_model():
+    """Lazily load and return the sentence transformer model.
+
+    Falls back to a lightweight bag-of-words embedding if transformers are unavailable.
+    """
+    global _embedding_model
+    if _embedding_model is not None:
+        return _embedding_model
+    try:
+        from sentence_transformers import SentenceTransformer  # type: ignore
+        _embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    except Exception:
+        _embedding_model = None
+    return _embedding_model
+
+def _embed_texts(texts: List[str]) -> List[List[float]]:
+    """Embed a list of texts into vector representations.
+
+    Uses SentenceTransformer if available; otherwise, computes a simple
+    normalized bag-of-words vector over the given batch (shared vocabulary).
+    """
+    model = _get_embedding_model()
+    if model is not None:
+        vectors = model.encode(texts, normalize_embeddings=True)
+        # Ensure list of lists
+        return [vec.tolist() if hasattr(vec, "tolist") else list(vec) for vec in vectors]
+
+    # Fallback: simple bag-of-words with shared vocab
+    # Build vocabulary for this batch
+    vocab: Dict[str, int] = {}
+    for text in texts:
+        for token in text.lower().split():
+            if token not in vocab:
+                vocab[token] = len(vocab)
+
+    dim = len(vocab)
+    vectors: List[List[float]] = []
+    for text in texts:
+        vec = [0.0] * dim
+        tokens = text.lower().split()
+        for token in tokens:
+            idx = vocab.get(token)
+            if idx is not None:
+                vec[idx] += 1.0
+        # L2 normalize
+        norm = sqrt(sum(v * v for v in vec)) or 1.0
+        vec = [v / norm for v in vec]
+        vectors.append(vec)
+    return vectors
+
+def _cosine(a: List[float], b: List[float]) -> float:
+    """Compute cosine similarity between two vectors (assumed normalized)."""
+    # If not equal length, compare up to min length
+    n = min(len(a), len(b))
+    if n == 0:
+        return 0.0
+    return sum(a[i] * b[i] for i in range(n))
 
 def get_database_schema_info(conn: sqlite3.Connection) -> str:
-    """Get comprehensive database schema information"""
+    """Get comprehensive database schema information with column analysis"""
     cursor = conn.cursor()
     
     # Get all tables
@@ -32,18 +91,36 @@ def get_database_schema_info(conn: sqlite3.Connection) -> str:
         cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
         count = cursor.fetchone()[0]
         
-        # Format columns
+        # Analyze column types for ORDER BY compatibility
         col_info = []
+        numeric_columns = []
+        date_columns = []
+        
         for col in columns:
             col_name = col[1]
-            col_type = col[2]
+            col_type = col[2].upper()
             is_pk = bool(col[5])
             pk_marker = " (PRIMARY KEY)" if is_pk else ""
+            
+            # Check if column is suitable for ORDER BY
+            if col_type in ['INTEGER', 'REAL', 'NUMERIC']:
+                numeric_columns.append(col_name)
+            elif col_type in ['TEXT'] and any(date_word in col_name.upper() for date_word in ['TIME', 'DATE', 'ADMIT', 'DISCH']):
+                date_columns.append(col_name)
+            
             col_info.append(f"{col_name} ({col_type}){pk_marker}")
+        
+        # Add ORDER BY compatibility info
+        order_by_info = ""
+        if numeric_columns or date_columns:
+            order_by_cols = numeric_columns + date_columns
+            order_by_info = f"\n  🔢 ORDER BY uygun kolonlar: {', '.join(order_by_cols)}"
+        else:
+            order_by_info = "\n  ⚠️ ORDER BY için uygun kolon yok - LIMIT kullanmayın"
         
         schema_info.append(f"""
 📋 {table_name} ({count} kayıt):
-  - {', '.join(col_info)}""")
+  - {', '.join(col_info)}{order_by_info}""")
     
     return "\n".join(schema_info)
 
@@ -121,14 +198,16 @@ def generate_system_prompt(conn: sqlite3.Connection) -> str:
 ### Zaman Bazlı Sorgular
 - "Son 30 günde kaç yatış var?" → `SELECT COUNT(*) FROM json_admissions WHERE admittime >= date('now', '-30 days')`
 - "2024 yılında kaç hasta geldi?" → `SELECT COUNT(*) FROM json_admissions WHERE strftime('%Y', admittime) = '2024'`
+- "En son yatış ne zaman?" → `SELECT admittime, dischtime, admission_type FROM json_admissions ORDER BY admittime DESC LIMIT 1`
+- "En yeni 5 yatış" → `SELECT admittime, dischtime, admission_type FROM json_admissions ORDER BY admittime DESC LIMIT 5`
 
 ### İlişkisel Sorgular
 - "Hangi hastalar birden fazla yatış yapmış?" → `SELECT subject_id, COUNT(*) FROM json_admissions GROUP BY subject_id HAVING COUNT(*) > 1`
 - "Hangi doktorlar en çok hasta kabul etmiş?" → `SELECT admit_provider_id, COUNT(*) FROM json_admissions GROUP BY admit_provider_id ORDER BY COUNT(*) DESC`
 
-## ⚠️ ÖNEMLİ KURALLAR
+## ⚠️ ÖNEMLİ KURALLAR - VERİ GÜVENLİĞİ
 
-1. **Sadece SELECT sorguları** oluştur - INSERT, UPDATE, DELETE yasak
+1. **SADECE SELECT sorguları** oluştur - INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, REPLACE YASAK
 2. **Tek SQL statement** döndür - Birden fazla statement yasak
 3. **Noktalı virgül kullanma** - SQL statement sonunda ; koyma
 4. **Güvenli sorgular** yaz - SQL injection'a karşı dikkatli ol
@@ -136,6 +215,13 @@ def generate_system_prompt(conn: sqlite3.Connection) -> str:
 6. **Türkçe cevap ver** - Kullanıcı Türkçe soruyorsa Türkçe yanıtla
 7. **Anlamlı sonuçlar** döndür - Sadece sayı değil, açıklama da ekle
 8. **Hata durumunda** - Veri bulunamazsa açık mesaj ver
+9. **LIMIT kullanırken ORDER BY zorunlu** - LIMIT kullanacaksan mutlaka ORDER BY ekle
+10. **ORDER BY için numeric/tarih kolonu gerekli** - ORDER BY kullanacaksan kolonun INTEGER, REAL, DATE, DATETIME olması lazım
+11. **Numeric kolon yoksa LIMIT kullanma** - Eğer ORDER BY yapabilecek numeric/tarih kolonu yoksa LIMIT kullanma
+12. **En son/en yeni** soruları için ORDER BY ... DESC LIMIT 1 kullan (sadece numeric/tarih kolonlarla)
+13. **Şema analizi yap** - Her tablo için ORDER BY uygun kolonları kontrol et
+14. **VERİ DEĞİŞTİRME YASAK** - Hiçbir şekilde veri ekleme, silme, güncelleme yapma
+15. **SADECE OKUMA** - Sadece mevcut verileri okuyup raporla
 
 ## 🔍 SORU ANALİZİ
 
@@ -198,174 +284,241 @@ Bu bilgileri kullanarak kullanıcı sorularını en doğru şekilde SQL sorgular
     return enhanced_prompt
 
 
-# ---- Minimal RAG over schema: keyword-based top-K retriever ----
+def get_contextual_system_prompt(conn: sqlite3.Connection, question: str) -> str:
+    """
+    Get contextual system prompt with relevant schema snippets
+    
+    Args:
+        conn: Database connection
+        question: User question
+        
+    Returns:
+        Enhanced system prompt with relevant schema
+    """
+    # Get relevant schema snippets
+    relevant_schema = get_relevant_schema_snippets(conn, question, top_k=3)
+    
+    # Get basic system prompt
+    base_prompt = get_enhanced_system_prompt(conn)
+    
+    # Combine with relevant schema
+    contextual_prompt = f"""{base_prompt}
 
-def _tokenize(text: str) -> List[str]:
-    return re.findall(r"[a-zA-Z0-9_]+", text.lower())
+## Relevant Schema for this Query
+{relevant_schema}
+
+Use the above schema information to generate the most accurate SQL query for the user's question."""
+    
+    return contextual_prompt
 
 
 def get_relevant_schema_snippets(conn: sqlite3.Connection, question: str, top_k: int = 3) -> str:
-    """Select top-k tables/columns relevant to the question using simple token overlap.
-    This is a lightweight alternative to embeddings for Task 2.
     """
-    # Lightweight synonym expansion (TR -> EN/field hints)
-    synonym_map = {
-        "hasta": ["patient", "json_patients", "subject_id", "gender", "age", "anchor_age"],
-        "yas": ["age", "anchor_age"],
-        "yaş": ["age", "anchor_age"],
-        "cinsiyet": ["gender"],
-        "yatış": ["admission", "json_admissions", "hadm_id", "admission_type", "admittime", "dischtime"],
-        "yatis": ["admission", "json_admissions", "hadm_id", "admission_type"],
-        "yatış tipi": ["admission_type"],
-        "doktor": ["provider", "json_providers", "admit_provider_id", "provider_id"],
-        "personel": ["provider", "json_providers"],
-        "transfer": ["transfer", "json_transfers", "careunit", "eventtype"],
-        "bakim birimi": ["careunit"],
-        "bakım birimi": ["careunit"],
-        "servis": ["careunit"],
-        "klinik": ["careunit"],
-    }
-
-    expanded = question.lower()
-    for tr, hints in synonym_map.items():
-        if tr in expanded:
-            expanded += " " + " ".join(hints)
-
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = [r[0] for r in cursor.fetchall() if r[0] != 'sqlite_sequence']
-
-    q_tokens = set(_tokenize(expanded))
-    scored: List[tuple[str, int, List[str]]] = []
-
-    for table in tables:
-        cursor.execute(f"PRAGMA table_info({table})")
-        cols = cursor.fetchall()
-        col_names = [c[1] for c in cols]
-        corpus = f"{table} " + " ".join(col_names)
-        t_tokens = set(_tokenize(corpus))
-        score = len(q_tokens & t_tokens)
-        scored.append((table, score, col_names))
-
-    scored.sort(key=lambda x: x[1], reverse=True)
-    top = [s for s in scored[:top_k] if s[1] > 0] or scored[: min(top_k, len(scored))]
-
-    parts: List[str] = []
-    for table, _, col_names in top:
-        try:
-            cursor.execute(f"SELECT COUNT(*) FROM {table}")
-            count = cursor.fetchone()[0]
-        except Exception:
-            count = 0
-        parts.append(f"- Table: {table} ({count} rows)\n  Columns: {', '.join(col_names)}")
-
-    return "\n".join(parts) if parts else "- (No specific relevant tables detected; use overall schema above)"
-
-
-def get_contextual_system_prompt(conn: sqlite3.Connection, question: str) -> str:
-    base = get_enhanced_system_prompt(conn)
-    # Switchable: hybrid vs keyword-only
-    use_hybrid = os.getenv("RAG_HYBRID", "0") == "1"
-    if use_hybrid:
-        relevant = get_hybrid_relevant_schema_snippets(conn, question, top_k=int(os.getenv("RAG_TOP_K", "3")))
-    else:
-        relevant = get_relevant_schema_snippets(conn, question, top_k=int(os.getenv("RAG_TOP_K", "3")))
-    return f"{base}\n\n## 🔎 İlgili Şema (Soruya göre)\n{relevant}\n\nYukarıdaki ilgili şemayı kullanarak tek ve güvenli bir SELECT sorgusu üret."
-
-
-# ---- Hybrid RAG (semantic + keyword) over schema ----
-
-def _build_schema_docs(conn: sqlite3.Connection) -> List[Dict[str, str]]:
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = [r[0] for r in cursor.fetchall() if r[0] != 'sqlite_sequence']
-    docs: List[Dict[str, str]] = []
-    for table in tables:
-        cursor.execute(f"PRAGMA table_info({table})")
-        cols = cursor.fetchall()
-        for col in cols:
-            col_name = col[1]
-            col_type = col[2]
-            text = f"table: {table} | column: {col_name} | type: {col_type}"
-            docs.append({"table": table, "column": col_name, "text": text})
-        # Also a table-level doc
-        texts = ", ".join([c[1] for c in cols])
-        docs.append({"table": table, "column": "*", "text": f"table: {table} | columns: {texts}"})
-    return docs
-
-
-def _embed_texts(texts: List[str]) -> List[List[float]]:
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-    # Batch embed
-    res = client.embeddings.create(model=model, input=texts)
-    return [d.embedding for d in res.data]
-
-
-def _cosine(a: List[float], b: List[float]) -> float:
-    import math
-    dot = sum(x*y for x, y in zip(a, b))
-    na = math.sqrt(sum(x*x for x in a))
-    nb = math.sqrt(sum(x*x for x in b))
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
+    Get relevant schema snippets based on question keywords
+    
+    Args:
+        conn: Database connection
+        question: User question
+        top_k: Number of top relevant snippets to return
+        
+    Returns:
+        Relevant schema snippets as string
+    """
+    try:
+        # Get all schema documents
+        docs = _build_schema_docs(conn)
+        
+        if not docs:
+            return "No schema information available."
+        
+        # Simple keyword matching for now
+        question_lower = question.lower()
+        relevant_docs = []
+        
+        # Score documents based on keyword matches
+        for doc in docs:
+            score = 0
+            text = doc.get("text", "").lower()
+            
+            # Medical domain keywords
+            medical_keywords = [
+                "hasta", "patient", "yatış", "admission", "transfer", 
+                "doktor", "provider", "yaş", "age", "cinsiyet", "gender",
+                "admittime", "dischtime", "careunit", "admission_type"
+            ]
+            
+            for keyword in medical_keywords:
+                if keyword in question_lower and keyword in text:
+                    score += 1
+            
+            if score > 0:
+                relevant_docs.append((score, doc))
+        
+        # Sort by score and take top_k
+        relevant_docs.sort(key=lambda x: x[0], reverse=True)
+        top_docs = relevant_docs[:top_k]
+        
+        if not top_docs:
+            # Fallback: return first few docs
+            top_docs = [(0, doc) for doc in docs[:top_k]]
+        
+        # Format results
+        result_parts = []
+        for score, doc in top_docs:
+            table = doc.get("table", "")
+            column = doc.get("column", "")
+            text = doc.get("text", "")
+            result_parts.append(f"Table: {table}, Column: {column}\n{text}")
+        
+        return "\n\n".join(result_parts)
+        
+    except Exception as e:
+        print(f"Error getting relevant schema snippets: {e}")
+        return "Error retrieving schema information."
 
 
 def get_hybrid_relevant_schema_snippets(conn: sqlite3.Connection, question: str, top_k: int = 3) -> str:
-    """Hybrid retrieval: semantic (embeddings) + keyword/metadata scoring."""
-    # Build docs
-    docs = _build_schema_docs(conn)
-    if not docs:
-        return get_relevant_schema_snippets(conn, question, top_k)
-
-    # Semantic scores
+    """
+    Get relevant schema snippets using hybrid approach (embedding + keyword)
+    
+    Args:
+        conn: Database connection
+        question: User question
+        top_k: Number of top relevant snippets to return
+        
+    Returns:
+        Relevant schema snippets as string
+    """
     try:
-        q_emb = _embed_texts([question])[0]
-        doc_embs = _embed_texts([d["text"] for d in docs])
-        sem_scores = [_cosine(q_emb, e) for e in doc_embs]
-    except Exception:
-        # Fallback to keyword-only on embedding error
+        # Get all schema documents
+        docs = _build_schema_docs(conn)
+        
+        if not docs:
+            return "No schema information available."
+        
+        # Extract texts for embedding
+        texts = [doc.get("text", "") for doc in docs]
+        
+        # Get embeddings
+        question_embedding = _embed_texts([question])[0]
+        doc_embeddings = _embed_texts(texts)
+        
+        # Calculate similarities
+        similarities = []
+        for i, doc_embedding in enumerate(doc_embeddings):
+            similarity = _cosine(question_embedding, doc_embedding)
+            similarities.append((similarity, docs[i]))
+        
+        # Sort by similarity and take top_k
+        similarities.sort(key=lambda x: x[0], reverse=True)
+        top_docs = similarities[:top_k]
+        
+        # Format results
+        result_parts = []
+        for similarity, doc in top_docs:
+            table = doc.get("table", "")
+            column = doc.get("column", "")
+            text = doc.get("text", "")
+            result_parts.append(f"Table: {table}, Column: {column} (similarity: {similarity:.3f})\n{text}")
+        
+        return "\n\n".join(result_parts)
+        
+    except Exception as e:
+        print(f"Error getting hybrid relevant schema snippets: {e}")
+        # Fallback to keyword-based approach
         return get_relevant_schema_snippets(conn, question, top_k)
 
-    # Keyword/metadata score (reuse tokenizer + synonyms)
-    synonym_text = question.lower()
-    # reuse synonym_map from earlier function by light expansion
-    # (avoid ref duplication: call get_relevant_schema_snippets to expand)
-    expanded_snippet = get_relevant_schema_snippets(conn, question, top_k=0)  # returns guidance text; we won't use
-    q_tokens = set(_tokenize(synonym_text))
 
-    kw_scores: List[int] = []
-    for d in docs:
-        t_tokens = set(_tokenize(d["text"]))
-        kw_scores.append(len(q_tokens & t_tokens))
+def get_hybrid_relevant_schema_snippets_with_metadata(
+    conn: sqlite3.Connection,
+    question: str,
+    metadata_filters: 'dict' = None,
+    top_k: int = 3,
+) -> str:
+    """Hybrid retrieval with optional metadata filters.
 
-    alpha = float(os.getenv("RAG_ALPHA", "0.7"))
-    combined = [(i, alpha*sem_scores[i] + (1-alpha)*(kw_scores[i] > 0)) for i in range(len(docs))]
-    combined.sort(key=lambda x: x[1], reverse=True)
+    metadata_filters example:
+      {"table": "json_admissions"} or {"column": "admittime"}
+    """
+    try:
+        docs = _build_schema_docs(conn)
+        if not docs:
+            return "No schema information available."
 
-    # Aggregate by table, keep best per table
-    table_best: Dict[str, float] = {}
-    for idx, sc in combined:
-        tb = docs[idx]["table"]
-        if tb not in table_best:
-            table_best[tb] = sc
-        if len(table_best) >= max(top_k, 1):
-            # we still continue but limit will apply on formatting
-            pass
+        # Apply metadata filters first
+        if metadata_filters:
+            filtered = []
+            for d in docs:
+                ok = True
+                for k, v in metadata_filters.items():
+                    if str(d.get(k, "")).lower() != str(v).lower():
+                        ok = False
+                        break
+                if ok:
+                    filtered.append(d)
+            docs = filtered or docs
 
-    # Format top-k tables with columns
-    ranked_tables = sorted(table_best.items(), key=lambda x: x[1], reverse=True)[:top_k]
-    out_lines: List[str] = []
+        texts = [doc.get("text", "") for doc in docs]
+        question_embedding = _embed_texts([question])[0]
+        doc_embeddings = _embed_texts(texts)
+
+        similarities = []
+        for i, doc_embedding in enumerate(doc_embeddings):
+            similarity = _cosine(question_embedding, doc_embedding)
+            similarities.append((similarity, docs[i]))
+
+        similarities.sort(key=lambda x: x[0], reverse=True)
+        top_docs = similarities[:top_k]
+
+        result_parts = []
+        for similarity, doc in top_docs:
+            table = doc.get("table", "")
+            column = doc.get("column", "")
+            text = doc.get("text", "")
+            result_parts.append(f"Table: {table}, Column: {column} (similarity: {similarity:.3f})\n{text}")
+
+        return "\n\n".join(result_parts)
+    except Exception:
+        return get_hybrid_relevant_schema_snippets(conn, question, top_k)
+
+
+def _build_schema_docs(conn: sqlite3.Connection) -> List[Dict[str, str]]:
+    """Build schema documents for retrieval"""
+    docs = []
     cursor = conn.cursor()
-    for tb, _ in ranked_tables:
-        try:
-            cursor.execute(f"SELECT COUNT(*) FROM {tb}")
-            count = cursor.fetchone()[0]
-        except Exception:
-            count = 0
-        cursor.execute(f"PRAGMA table_info({tb})")
-        cols = cursor.fetchall()
-        col_names = [c[1] for c in cols]
-        out_lines.append(f"- Table: {tb} ({count} rows)\n  Columns: {', '.join(col_names)}")
-    return "\n".join(out_lines) if out_lines else get_relevant_schema_snippets(conn, question, top_k)
+    
+    try:
+        # Get all tables
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = cursor.fetchall()
+        
+        for table in tables:
+            table_name = table[0]
+            
+            # Skip system tables
+            if table_name in ['sqlite_sequence']:
+                continue
+                
+            # Get table info
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            columns = cursor.fetchall()
+            
+            # Create document for each column
+            for col in columns:
+                col_name = col[1]
+                col_type = col[2]
+                is_pk = bool(col[5])
+                pk_marker = " (PRIMARY KEY)" if is_pk else ""
+                
+                text = f"Column: {col_name} ({col_type}){pk_marker} in table {table_name}"
+                docs.append({"table": table_name, "column": col_name, "type": col_type, "is_pk": str(is_pk), "text": text})
+            
+            # Also create a table-level document
+            col_names = [col[1] for col in columns]
+            table_text = f"Table: {table_name} with columns: {', '.join(col_names)}"
+            docs.append({"table": table_name, "column": "*", "type": "table", "is_pk": "False", "text": table_text})
+            
+    except Exception as e:
+        print(f"Error building schema docs: {e}")
+    
+    return docs

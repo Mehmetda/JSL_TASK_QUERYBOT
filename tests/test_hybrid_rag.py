@@ -2,7 +2,7 @@
 Test hybrid RAG (embedding + keyword) vs keyword-only on schema retrieval.
 
 Run:
-  python test_hybrid_rag.py
+  python tests/test_hybrid_rag.py
 Requires:
   - OPENAI_API_KEY in env
   - EMBEDDING_MODEL (optional, defaults to text-embedding-3-small)
@@ -11,8 +11,9 @@ import os
 import sys
 from pathlib import Path
 
+# Add project root to Python path
 CURRENT = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT
+PROJECT_ROOT = CURRENT.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.db.connection import get_connection
@@ -47,5 +48,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

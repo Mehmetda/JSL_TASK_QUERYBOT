@@ -3,43 +3,52 @@ SQL Agent with LLM integration and dynamic schema support
 """
 import os
 import sqlite3
-from openai import OpenAI
 from app.db.connection import get_connection
 from app.agents.system_prompt import get_contextual_system_prompt
+from app.llm.llm_manager import get_llm_manager
+from app.tools.ner_filter import SpaCyNERProvider, build_system_context_block
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Use LLM manager for flexible LLM selection
+llm_manager = get_llm_manager()
 
 # last LLM usage (for metrics)
 LAST_LLM_USAGE = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
 def generate_sql_with_llm(question: str, conn: sqlite3.Connection) -> str:
-    """Generate SQL using OpenAI LLM with dynamic schema"""
+    """Generate SQL using local LLM with dynamic schema and NER filtering"""
     try:
+        # Run NER filtering and de-identification before sending to LLM
+        language_code = "tr"  # could be detected dynamically
+        ner = SpaCyNERProvider(language_code=language_code)
+        ner_result = ner.filter_and_deidentify(question)
+
+        # Augment system prompt with entity context
         system_prompt = get_contextual_system_prompt(conn, question)
+        entity_block = build_system_context_block(ner_result.desired_entities)
+        system_prompt = f"{system_prompt}\n\n## Extracted entities (sanitized input used)\n{entity_block}"
         
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+        response = llm_manager.generate_response(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Kullanıcı Sorusu: {question}\n\nSQL Sorgusu:"}
+                {"role": "user", "content": f"Kullanıcı Sorusu (sanitize): {ner_result.sanitized_text}\n\nSQL Sorgusu:"}
             ],
             max_tokens=300,
             temperature=0.1
         )
         # capture usage for token metrics
         try:
-            usage = response.usage
-            if usage is not None:
+            usage = response.get("usage", {})
+            if usage:
                 LAST_LLM_USAGE.update({
-                    "prompt_tokens": getattr(usage, "prompt_tokens", 0),
-                    "completion_tokens": getattr(usage, "completion_tokens", 0),
-                    "total_tokens": getattr(usage, "total_tokens", 0),
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "completion_tokens": usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
                 })
         except Exception:
             pass
         
-        sql_query = response.choices[0].message.content.strip()
+        sql_query = response.get("content", "").strip()
         
         # Clean up SQL query
         if sql_query.startswith("```sql"):
@@ -52,9 +61,39 @@ def generate_sql_with_llm(question: str, conn: sqlite3.Connection) -> str:
         if ';' in sql_query:
             sql_query = sql_query.split(';')[0].strip()
         
-        # Ensure it's a single SELECT statement
-        if not sql_query.upper().startswith('SELECT'):
+        # Ensure it's a single SELECT statement and no data modification
+        sql_upper = sql_query.upper().strip()
+        dangerous_keywords = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'CREATE', 'TRUNCATE', 'REPLACE', 'EXEC', 'EXECUTE']
+        
+        if not sql_upper.startswith('SELECT'):
             return generate_sql_fallback(question)
+            
+        # Check for dangerous keywords
+        for keyword in dangerous_keywords:
+            if keyword in sql_upper:
+                print(f"Security: Dangerous keyword '{keyword}' detected, using fallback")
+                return generate_sql_fallback(question)
+        
+        # Check for ORDER BY with LIMIT but no numeric columns
+        if 'ORDER BY' in sql_upper and 'LIMIT' in sql_upper:
+            # This is a basic check - in production you'd want to parse the ORDER BY clause
+            # and check if the column is numeric/date type
+            print("Info: ORDER BY with LIMIT detected - ensure column is numeric/date type")
+            
+            # Try to validate against schema if possible
+            try:
+                cursor = conn.cursor()
+                # Extract table name from query (basic approach)
+                if 'FROM' in sql_upper:
+                    table_part = sql_upper.split('FROM')[1].split()[0]
+                    # Check if table has numeric columns
+                    cursor.execute(f"PRAGMA table_info({table_part})")
+                    columns = cursor.fetchall()
+                    numeric_cols = [col[1] for col in columns if col[2].upper() in ['INTEGER', 'REAL', 'NUMERIC']]
+                    if not numeric_cols:
+                        print(f"Warning: Table {table_part} has no numeric columns for ORDER BY")
+            except Exception as e:
+                print(f"Schema validation error: {e}")
         
         return sql_query
         

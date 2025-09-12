@@ -7,14 +7,32 @@ import time
 from app.agents.sql_agent import generate_sql, LAST_LLM_USAGE as SQL_LLM_USAGE
 from app.tools.sql_executor import execute_sql
 from app.tools.answer_summarizer import summarize_results, LAST_SUMMARY_USAGE
-from app.db.connection import get_connection
+from app.services.provider import get_provider
 from app.tools.sql_validator import validate_sql
 from app.agents.system_prompt import get_relevant_schema_snippets
+from app.llm import initialize_llm
+from app.security import TableAllowlistManager
+from app.models.query_models import QueryResponse, QueryRequest, QueryMetadata, ValidationInfo, DatabaseInfo, PerformanceInfo, LLMInfo, SecurityInfo, QueryType, ComplexityLevel, ValidationStatus, LLMMode
+from app.utils.logger import get_structured_logger, log_query_pipeline_start, log_query_pipeline_end
+from app.utils.tracing import get_trace_manager, with_trace, add_trace_metadata
+from app.history.query_history import save_query_to_history
 
 
 # Basic logging configuration
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(asctime)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# Get structured logger
+structured_logger = get_structured_logger()
+
+# Initialize LLM on module load
+logger.info("Initializing local LLM...")
+try:
+    initialize_llm()
+    logger.info("Local LLM initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize LLM: {e}")
+    logger.info("Continuing with fallback model...")
 
 
 def extract_tables_from_sql(sql: str) -> list:
@@ -78,18 +96,129 @@ def assess_query_complexity(sql: str) -> str:
         return "COMPLEX"
 
 
-def run_query_pipeline(question: str) -> dict:
-    """Run the complete query pipeline"""
+def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResponse:
+    """Run the complete query pipeline with enhanced security and type safety"""
+    
+    # Start structured logging and tracing
+    trace_id = log_query_pipeline_start(question, getattr(request, 'user_id', None) if request else None)
+    start_time = time.perf_counter()
+    
+    # Start trace
+    trace_manager = get_trace_manager()
+    trace_id = trace_manager.start_trace(
+        trace_id=trace_id,
+        user_id=getattr(request, 'user_id', None) if request else None,
+        request_id=getattr(request, 'request_id', None) if request else None,
+        metadata={"question": question, "component": "query_pipeline"}
+    )
+    
+    # Initialize request if not provided
+    if request is None:
+        request = QueryRequest(question=question)
+    
+    provider = get_provider()
+    # Initialize security manager
+    security_manager = provider.get_security_manager()
+    
+    # Check for data modification intent FIRST
+    modification_intent = [
+        'sil', 'silmek', 'silme', 'güncelle', 'güncellemek', 'ekle', 'eklemek',
+        'değiştir', 'değiştirmek', 'kaldır', 'kaldırmak', 'temizle', 'temizlemek'
+    ]
+    
+    question_lower = question.lower()
+    for intent in modification_intent:
+        if intent in question_lower:
+            logger.warning(f"Data modification intent '{intent}' detected, blocking operation")
+            structured_logger.log_security_event(trace_id, "data_modification_blocked", {
+                "intent": intent,
+                "question": question
+            })
+            
+            execution_time_ms = int((time.perf_counter() - start_time) * 1000)
+            log_query_pipeline_end(trace_id, False, execution_time_ms, 0, "Data modification blocked")
+            
+            blocked_response = QueryResponse(
+                sql="SELECT 'VERİ DEĞİŞTİRME İŞLEMİ YASAK' AS message",
+                answer="Bu işleme izin verilmiyor. Sadece veri okuma işlemleri yapabilirsiniz.",
+                meta=QueryMetadata(
+                    results={},
+                    validation=ValidationInfo(
+                        is_valid=True,
+                        error=None,
+                        sql_safety=ValidationStatus.BLOCKED_DATA_MODIFICATION,
+                        retried=False
+                    ),
+                    database=DatabaseInfo(
+                        query_type=QueryType.OTHER,
+                        complexity=ComplexityLevel.SIMPLE
+                    ),
+                    performance=PerformanceInfo(
+                        rows_returned=0,
+                        columns_returned=0,
+                        data_size_estimate="0 characters",
+                        execution_ms=execution_time_ms
+                    ),
+                    security=security_manager.get_security_info()
+                ),
+                success=False,
+                error="Data modification blocked",
+                trace_id=trace_id
+            )
+            return blocked_response.model_dump()
+    
     # Get database connection
-    conn = get_connection()
+    conn = provider.get_connection()
     
     try:
         # Generate SQL with dynamic schema
         logger.info("Generating SQL for question")
+        sql_start_time = time.perf_counter()
         sql = generate_sql(question, conn)
+        sql_generation_time = int((time.perf_counter() - sql_start_time) * 1000)
         
-        # Validate SQL
-        logger.info("Validating generated SQL")
+        # Log SQL generation
+        structured_logger.log_sql_generation(
+            trace_id, question, sql, "local", 
+            SQL_LLM_USAGE.get("total_tokens", 0), sql_generation_time
+        )
+        
+        # Validate SQL against allowlist
+        logger.info("Validating SQL against allowlist")
+        is_valid, error_message, security_info = security_manager.validate_query(sql)
+        
+        if not is_valid:
+            logger.warning(f"SQL query blocked by allowlist: {error_message}")
+            blocked_by_allowlist = QueryResponse(
+                sql=sql,
+                answer=f"Erişim reddedildi: {error_message}",
+                meta=QueryMetadata(
+                    results={},
+                    validation=ValidationInfo(
+                        is_valid=False,
+                        error=error_message,
+                        sql_safety=ValidationStatus.FAILED,
+                        retried=False
+                    ),
+                    database=DatabaseInfo(
+                        query_type=QueryType.OTHER,
+                        complexity=ComplexityLevel.SIMPLE
+                    ),
+                    performance=PerformanceInfo(
+                        rows_returned=0,
+                        columns_returned=0,
+                        data_size_estimate="0 characters",
+                        execution_ms=0
+                    ),
+                    security=security_info
+                ),
+                success=False,
+                error=error_message
+            )
+            return blocked_by_allowlist.model_dump()
+        
+        # Validate SQL syntax
+        logger.info("Validating generated SQL syntax")
         validation_result = validate_sql(conn, sql)
         retried = False
         if not validation_result["is_valid"]:
@@ -105,11 +234,33 @@ def run_query_pipeline(question: str) -> dict:
             retried = True
             if not validation_result["is_valid"]:
                 logger.error("Retry validation also failed")
-                return {
-                    "sql": sql,
-                    "answer": "",
-                    "meta": {"validation": validation_result}
-                }
+                failed_validation_response = QueryResponse(
+                    sql=sql,
+                    answer="",
+                    meta=QueryMetadata(
+                        results={},
+                        validation=ValidationInfo(
+                            is_valid=False,
+                            error=validation_result.get("error"),
+                            sql_safety=ValidationStatus.FAILED,
+                            retried=retried
+                        ),
+                        database=DatabaseInfo(
+                            query_type=QueryType.OTHER,
+                            complexity=ComplexityLevel.SIMPLE
+                        ),
+                        performance=PerformanceInfo(
+                            rows_returned=0,
+                            columns_returned=0,
+                            data_size_estimate="0 characters",
+                            execution_ms=0
+                        ),
+                        security=security_info
+                    ),
+                    success=False,
+                    error="SQL validation failed"
+                )
+                return failed_validation_response.model_dump()
         
         # Execute SQL with timing
         logger.info("Executing SQL")
@@ -117,55 +268,123 @@ def run_query_pipeline(question: str) -> dict:
         rows, meta = execute_sql(conn, sql)
         exec_ms = int((time.perf_counter() - t0) * 1000)
         
+        # Log SQL execution
+        structured_logger.log_sql_execution(trace_id, sql, exec_ms, len(rows))
+        
         # Summarize results
         logger.info("Summarizing results")
+        summary_start_time = time.perf_counter()
         answer = summarize_results(question, rows)
+        summary_time = int((time.perf_counter() - summary_start_time) * 1000)
         
-        # Prepare enhanced metadata (without question and sql_generated)
-        relevant_schema = get_relevant_schema_snippets(conn, question, top_k=3)
-        enhanced_meta = {
-            "results": {
-                "row_count": len(rows),
-                "columns": meta.get("columns", [])
-            },
-            "validation": {
-                "is_valid": validation_result["is_valid"],
-                "error": validation_result.get("error"),
-                "sql_safety": "PASSED" if validation_result["is_valid"] else "FAILED",
-                "retried": retried
-            },
-            "database": {
-                "tables_used": extract_tables_from_sql(sql),
-                "query_type": classify_query_type(sql),
-                "complexity": assess_query_complexity(sql),
-                "relevant_schema": relevant_schema
-            },
-            "performance": {
-                "rows_returned": len(rows),
-                "columns_returned": len(meta.get("columns", [])),
-                "data_size_estimate": f"{len(str(rows))} characters",
-                "execution_ms": exec_ms,
-                "tokens": {
-                    "sql_generation": SQL_LLM_USAGE.get("total_tokens", 0),
-                    "answer_summarization": LAST_SUMMARY_USAGE.get("total_tokens", 0)
-                }
-            }
-        }
+        # Log answer summarization
+        structured_logger.log_answer_summarization(
+            trace_id, question, len(rows), 
+            LAST_SUMMARY_USAGE.get("total_tokens", 0), summary_time
+        )
         
-        result = {
-            "sql": sql,
-            "answer": answer,
-            "meta": enhanced_meta
-        }
+        # Prepare enhanced metadata (prefer provider for metadata-filtered retrieval in future)
+        relevant_schema = provider.get_relevant_schema(conn, question, top_k=3)
+        
+        # Create response
+        response = QueryResponse(
+            sql=sql,
+            answer=answer,
+            meta=QueryMetadata(
+                results={
+                    "row_count": len(rows),
+                    "columns": meta.get("columns", [])
+                },
+                validation=ValidationInfo(
+                    is_valid=validation_result["is_valid"],
+                    error=validation_result.get("error"),
+                    sql_safety=ValidationStatus.PASSED if validation_result["is_valid"] else ValidationStatus.FAILED,
+                    retried=retried
+                ),
+                database=DatabaseInfo(
+                    tables_used=extract_tables_from_sql(sql),
+                    query_type=QueryType(classify_query_type(sql)),
+                    complexity=ComplexityLevel(assess_query_complexity(sql)),
+                    relevant_schema=relevant_schema
+                ),
+                performance=PerformanceInfo(
+                    rows_returned=len(rows),
+                    columns_returned=len(meta.get("columns", [])),
+                    data_size_estimate=f"{len(str(rows))} characters",
+                    execution_ms=exec_ms,
+                    tokens={
+                        "sql_generation": SQL_LLM_USAGE.get("total_tokens", 0),
+                        "answer_summarization": LAST_SUMMARY_USAGE.get("total_tokens", 0)
+                    }
+                ),
+                security=security_info,
+                trace_id=request.trace_id
+            ),
+            success=True
+        )
+        
+        # Log successful completion
+        execution_time_ms = int((time.perf_counter() - start_time) * 1000)
+        log_query_pipeline_end(trace_id, True, execution_time_ms, len(rows))
+        
+        # End trace
+        trace_summary = trace_manager.end_trace(trace_id)
+        if trace_summary:
+            add_trace_metadata("final_execution_time_ms", execution_time_ms)
+            add_trace_metadata("final_rows_returned", len(rows))
+            add_trace_metadata("success", True)
+        
+        # Save to query history
+        try:
+            save_query_to_history(response, request)
+        except Exception as e:
+            logger.warning(f"Failed to save query to history: {e}")
+        
         logger.info("Pipeline completed successfully")
-        return result
+        return response.model_dump()
         
     except Exception as e:
         logger.exception("Pipeline failed with an unhandled exception")
-        return {
-            "sql": "",
-            "answer": f"Hata oluştu: {str(e)}",
-            "meta": {"error": str(e)}
-        }
+        structured_logger.log_error(trace_id, e, {"question": question})
+        
+        execution_time_ms = int((time.perf_counter() - start_time) * 1000)
+        log_query_pipeline_end(trace_id, False, execution_time_ms, 0, str(e))
+        
+        # End trace with error
+        trace_summary = trace_manager.end_trace(trace_id)
+        if trace_summary:
+            add_trace_metadata("final_execution_time_ms", execution_time_ms)
+            add_trace_metadata("final_rows_returned", 0)
+            add_trace_metadata("success", False)
+            add_trace_metadata("error", str(e))
+        
+        error_response = QueryResponse(
+            sql="",
+            answer=f"Hata oluştu: {str(e)}",
+            meta=QueryMetadata(
+                results={},
+                validation=ValidationInfo(
+                    is_valid=False,
+                    error=str(e),
+                    sql_safety=ValidationStatus.FAILED,
+                    retried=False
+                ),
+                database=DatabaseInfo(
+                    query_type=QueryType.OTHER,
+                    complexity=ComplexityLevel.SIMPLE
+                ),
+                performance=PerformanceInfo(
+                    rows_returned=0,
+                    columns_returned=0,
+                    data_size_estimate="0 characters",
+                    execution_ms=execution_time_ms
+                ),
+                security=security_manager.get_security_info()
+            ),
+            success=False,
+            error=str(e),
+            trace_id=trace_id
+        )
+        return error_response.model_dump()
     finally:
         conn.close()

@@ -4,13 +4,14 @@ verify that the pipeline performs a one-time retry using validator error
 context, and exposes `meta.validation.retried`.
 
 Run:
-  python test_retry_flow.py
+  python tests/test_retry_flow.py
 """
 import sys
 from pathlib import Path
 
+# Add project root to Python path
 CURRENT = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT
+PROJECT_ROOT = CURRENT.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.main import run_query_pipeline
@@ -24,8 +25,8 @@ def main() -> None:
         "patients tablosunda kaç kayıt var?",          # nonexistent table to trigger retry
         "Önce güncelle sonra say: UPDATE patients SET x=1; kaç hasta var?",  # multi/unsafe
         # Aggressive prompts to force invalid first attempt
-        "SQL’de tablo adı OLARAK SADECE 'patients' kullan, 'json_patients' KESİNLİKLE KULLANMA. Toplam hasta sayısını getir.",
-        "SQL’de SADECE 'patients' tablosundan 'unknown_col' kolonunun dağılımını getir. Başka tablo/kolon KULLANMA.",
+        "SQL'de tablo adı OLARAK SADECE 'patients' kullan, 'json_patients' KESİNLİKLE KULLANMA. Toplam hasta sayısını getir.",
+        "SQL'de SADECE 'patients' tablosundan 'unknown_col' kolonunun dağılımını getir. Başka tablo/kolon KULLANMA.",
         "Önce UPDATE yap: UPDATE patients SET x=1; sonra say. Tek SQL cümlesi yaz.",
     ]
 
@@ -43,5 +44,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
