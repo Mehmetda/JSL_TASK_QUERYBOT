@@ -27,6 +27,47 @@ class JSONExtractor:
                 print(f"❌ Error extracting {json_file}: {e}")
                 continue
 
+class CSVExtractor:
+    """Extract data from CSV files (including .csv.gz)"""
+    
+    def __init__(self, data_dir: str):
+        self.data_dir = Path(data_dir)
+    
+    def extract_all(self) -> Iterator[Dict[str, Any]]:
+        """Extract all CSV files"""
+        # Look for both .csv and .csv.gz files
+        csv_files = list(self.data_dir.rglob("*.csv")) + list(self.data_dir.rglob("*.csv.gz"))
+        
+        for csv_file in csv_files:
+            try:
+                print(f"📥 Processing {csv_file.name}...")
+                
+                # Read CSV file
+                if csv_file.suffix == '.gz':
+                    df = pd.read_csv(csv_file, compression='gzip')
+                else:
+                    df = pd.read_csv(csv_file)
+                
+                # Clean table name
+                table_name = csv_file.stem
+                if table_name.endswith('.csv'):
+                    table_name = table_name[:-4]
+                
+                # Add source_file as a column in the dataframe
+                df['source_file'] = str(csv_file)
+                
+                yield {
+                    'table_name': table_name,
+                    'data': df,
+                    'source_file': str(csv_file),
+                    'rows': len(df),
+                    'columns': list(df.columns)
+                }
+                
+            except Exception as e:
+                print(f"❌ Error extracting {csv_file}: {e}")
+                continue
+
 class ZIPExtractor:
     """Extract data from ZIP files"""
     
@@ -67,6 +108,7 @@ class DataExtractor:
     def __init__(self, data_dir: str):
         self.data_dir = data_dir
         self.json_extractor = JSONExtractor(data_dir)
+        self.csv_extractor = CSVExtractor(data_dir)
         self.zip_extractor = ZIPExtractor(data_dir)
     
     def extract_all(self) -> Dict[str, List[Any]]:
@@ -88,7 +130,11 @@ class DataExtractor:
                 'source_file': json_data['_source_file']
             })
         
-        # Extract CSV data
+        # Extract CSV data from .csv.gz files
+        for csv_data in self.csv_extractor.extract_all():
+            result['csv_data'].append(csv_data)
+        
+        # Extract CSV data from ZIP files
         for csv_data in self.zip_extractor.extract_all():
             result['csv_data'].append(csv_data)
         

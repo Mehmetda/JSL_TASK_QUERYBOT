@@ -1,6 +1,7 @@
 """
-Local LLM module for Llama 7B integration
+LLM module for OpenAI and Ollama integration
 """
-from .local_llm_client import LocalLLMClient, get_local_llm_client, initialize_llm
+from .llm_manager import LLMManager, get_llm_manager
+from .ollama_client import OllamaClient, get_ollama_client, test_ollama_connection
 
-__all__ = ['LocalLLMClient', 'get_local_llm_client', 'initialize_llm']
+__all__ = ['LLMManager', 'get_llm_manager', 'OllamaClient', 'get_ollama_client', 'test_ollama_connection']

@@ -62,12 +62,12 @@ with st.sidebar:
     # Check connectivity
     internet_available = check_internet_connection()
     openai_available = check_openai_availability() if internet_available else False
-    local_available = llm_manager.local_client is not None
+    local_available = llm_manager.ollama_client is not None
 
     # If internet is down, make sure we don't stick to OpenAI-only mode
     try:
         if not internet_available and llm_manager.get_current_mode() == "openai":
-            llm_manager.set_mode("local")
+            llm_manager.set_mode("ollama")
     except Exception:
         pass
     
@@ -89,17 +89,17 @@ with st.sidebar:
     available_modes = llm_manager.get_available_modes()
     
     if "auto" in available_modes:
-        mode_options = ["auto", "openai", "local"]
+        mode_options = ["auto", "openai", "ollama"]
         mode_labels = {
             "auto": "🔄 Auto (Internet → Local)",
             "openai": "🔑 OpenAI Only",
-            "local": "🏠 Local Only"
+            "ollama": "🏠 Local Only"
         }
     else:
         mode_options = available_modes
         mode_labels = {
             "openai": "🔑 OpenAI",
-            "local": "🏠 Local"
+            "ollama": "🏠 Local"
         }
     
     selected_mode = st.radio(
@@ -121,7 +121,7 @@ with st.sidebar:
     effective_mode = llm_manager.get_effective_mode()
     if effective_mode == "openai":
         st.info("🎯 Currently using: OpenAI")
-    elif effective_mode == "local":
+    elif effective_mode == "ollama":
         st.info("🎯 Currently using: Local LLM")
     
     # (Removed LLM Status Details expander per request)

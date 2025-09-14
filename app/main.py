@@ -4,13 +4,13 @@ Main pipeline for QueryBot
 import re
 import logging
 import time
-from app.agents.sql_agent import generate_sql, LAST_LLM_USAGE as SQL_LLM_USAGE
+from app.agents.sql_agent import generate_sql_with_agent
 from app.tools.sql_executor import execute_sql
 from app.tools.answer_summarizer import summarize_results, LAST_SUMMARY_USAGE
 from app.services.provider import get_provider
 from app.tools.sql_validator import validate_sql
 from app.agents.system_prompt import get_relevant_schema_snippets
-from app.llm import initialize_llm
+from app.llm.llm_manager import get_llm_manager
 from app.security import TableAllowlistManager
 from app.models.query_models import QueryResponse, QueryRequest, QueryMetadata, ValidationInfo, DatabaseInfo, PerformanceInfo, LLMInfo, SecurityInfo, QueryType, ComplexityLevel, ValidationStatus, LLMMode
 from app.utils.logger import get_structured_logger, log_query_pipeline_start, log_query_pipeline_end
@@ -26,12 +26,12 @@ logger = logging.getLogger(__name__)
 structured_logger = get_structured_logger()
 
 # Initialize LLM on module load
-logger.info("Initializing local LLM...")
+logger.info("Initializing LLM manager...")
 try:
-    initialize_llm()
-    logger.info("Local LLM initialized successfully")
+    llm_manager = get_llm_manager()
+    logger.info("LLM manager initialized successfully")
 except Exception as e:
-    logger.error(f"Failed to initialize LLM: {e}")
+    logger.error(f"Failed to initialize LLM manager: {e}")
     logger.info("Continuing with fallback model...")
 
 
@@ -139,8 +139,8 @@ def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResp
             log_query_pipeline_end(trace_id, False, execution_time_ms, 0, "Data modification blocked")
             
             blocked_response = QueryResponse(
-                sql="SELECT 'VERİ DEĞİŞTİRME İŞLEMİ YASAK' AS message",
-                answer="Bu işleme izin verilmiyor. Sadece veri okuma işlemleri yapabilirsiniz.",
+                sql="SELECT 'DATA MODIFICATION NOT ALLOWED' AS message",
+                answer="This operation is not allowed. You can only perform data reading operations.",
                 meta=QueryMetadata(
                     results={},
                     validation=ValidationInfo(
@@ -171,16 +171,35 @@ def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResp
     conn = provider.get_connection()
     
     try:
-        # Generate SQL with dynamic schema
-        logger.info("Generating SQL for question")
+        # Generate SQL using new agent system
+        logger.info("Generating SQL for question using SQL Agent")
         sql_start_time = time.perf_counter()
-        sql = generate_sql(question, conn)
+        
+        # Use new SQL agent
+        sql_response = generate_sql_with_agent(
+            question=question,
+            language="en",
+            max_tokens=300,
+            temperature=0.1,
+            user_id=request.user_id if request else None,
+            session_id=request.session_id if request else None
+        )
+        
         sql_generation_time = int((time.perf_counter() - sql_start_time) * 1000)
+        
+        # Extract SQL and usage from agent response
+        if sql_response.success:
+            sql = sql_response.result.get("sql", "")
+            sql_usage = sql_response.result.get("usage", {})
+        else:
+            sql = ""
+            sql_usage = {}
+            logger.error(f"SQL generation failed: {sql_response.error}")
         
         # Log SQL generation
         structured_logger.log_sql_generation(
             trace_id, question, sql, "local", 
-            SQL_LLM_USAGE.get("total_tokens", 0), sql_generation_time
+            sql_usage.get("total_tokens", 0), sql_generation_time
         )
         
         # Validate SQL against allowlist
@@ -191,7 +210,7 @@ def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResp
             logger.warning(f"SQL query blocked by allowlist: {error_message}")
             blocked_by_allowlist = QueryResponse(
                 sql=sql,
-                answer=f"Erişim reddedildi: {error_message}",
+                answer=f"Access denied: {error_message}",
                 meta=QueryMetadata(
                     results={},
                     validation=ValidationInfo(
@@ -226,10 +245,21 @@ def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResp
             logger.warning("SQL validation failed, attempting one-time retry with guidance")
             retry_question = (
                 question
-                + "\nNot: Tek bir SELECT ifadesi üret, noktalı virgül kullanma, mevcut şemaya uygun sütun ve tablo isimlerini kullan."
-                + f"\nValidator hatası: {validation_result.get('error', '')}"
+                + "\nNote: Generate a single SELECT statement, do not use semicolons, use appropriate column and table names from the current schema."
+                + f"\nValidator error: {validation_result.get('error', '')}"
             )
-            sql = generate_sql(retry_question, conn)
+            retry_response = generate_sql_with_agent(
+                question=retry_question,
+                language="en",
+                max_tokens=300,
+                temperature=0.1,
+                user_id=request.user_id if request else None,
+                session_id=request.session_id if request else None
+            )
+            if retry_response.success:
+                sql = retry_response.result.get("sql", "")
+            else:
+                sql = ""
             validation_result = validate_sql(conn, sql)
             retried = True
             if not validation_result["is_valid"]:
@@ -313,7 +343,7 @@ def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResp
                     data_size_estimate=f"{len(str(rows))} characters",
                     execution_ms=exec_ms,
                     tokens={
-                        "sql_generation": SQL_LLM_USAGE.get("total_tokens", 0),
+                        "sql_generation": sql_usage.get("total_tokens", 0),
                         "answer_summarization": LAST_SUMMARY_USAGE.get("total_tokens", 0)
                     }
                 ),
@@ -360,7 +390,7 @@ def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResp
         
         error_response = QueryResponse(
             sql="",
-            answer=f"Hata oluştu: {str(e)}",
+            answer=f"An error occurred: {str(e)}",
             meta=QueryMetadata(
                 results={},
                 validation=ValidationInfo(

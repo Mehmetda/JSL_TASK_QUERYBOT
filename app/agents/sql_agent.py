@@ -1,142 +1,260 @@
 """
-SQL Agent with LLM integration and dynamic schema support
+SQL Agent v2 - Inherits from Base Agent
+
+This agent handles SQL generation using NER-enhanced hybrid RAG system.
+It inherits from BaseAgent to get common functionality like logging, tracing, and error handling.
 """
-import os
 import sqlite3
+from typing import Any, Dict, Optional
+from app.agents.base_agent import BaseAgent, AgentContext, AgentResponse
+from app.agents.system_prompt import get_ner_enhanced_hybrid_schema_snippets
 from app.db.connection import get_connection
-from app.agents.system_prompt import get_contextual_system_prompt
-from app.llm.llm_manager import get_llm_manager
-from app.tools.ner_filter import SpaCyNERProvider, build_system_context_block
-
-# Use LLM manager for flexible LLM selection
-llm_manager = get_llm_manager()
-
-# last LLM usage (for metrics)
-LAST_LLM_USAGE = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
-def generate_sql_with_llm(question: str, conn: sqlite3.Connection) -> str:
-    """Generate SQL using local LLM with dynamic schema and NER filtering"""
-    try:
-        # Run NER filtering and de-identification before sending to LLM
-        language_code = "tr"  # could be detected dynamically
-        ner = SpaCyNERProvider(language_code=language_code)
-        ner_result = ner.filter_and_deidentify(question)
-
-        # Augment system prompt with entity context
-        system_prompt = get_contextual_system_prompt(conn, question)
-        entity_block = build_system_context_block(ner_result.desired_entities)
-        system_prompt = f"{system_prompt}\n\n## Extracted entities (sanitized input used)\n{entity_block}"
+class SQLAgent(BaseAgent):
+    """
+    SQL Agent that generates SQL queries using NER-enhanced hybrid RAG.
+    
+    This agent:
+    1. Uses NER to extract entities from user questions
+    2. Applies entity-based metadata filtering for schema retrieval
+    3. Generates SQL queries using LLM with enhanced context
+    4. Provides comprehensive logging and error handling
+    """
+    
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """
+        Initialize SQL Agent
         
-        response = llm_manager.generate_response(
+        Args:
+            config: Optional configuration dictionary
+        """
+        super().__init__("SQLAgent", config)
+        
+        # SQL-specific configuration
+        self.default_top_k = self.config.get("top_k", 3)
+        self.default_language = self.config.get("language", "en")  # English by default
+        self.max_sql_length = self.config.get("max_sql_length", 1000)
+        
+        # SQL generation statistics
+        self._sql_generation_count = 0
+        self._successful_sql_count = 0
+    
+    def _execute_agent_logic(self, context: AgentContext, trace_id: str) -> Dict[str, Any]:
+        """
+        Execute SQL generation logic
+        
+        Args:
+            context: Agent context with question and parameters
+            trace_id: Trace ID for this execution
+            
+        Returns:
+            Dictionary containing SQL query and metadata
+        """
+        # Validate context
+        if not self.validate_context(context):
+            raise ValueError("Invalid agent context")
+        
+        # Get database connection
+        conn = get_connection()
+        
+        try:
+            # Generate SQL using NER-enhanced hybrid RAG
+            sql_result = self._generate_sql_with_ner_rag(
+                context, conn, trace_id
+            )
+            
+            # Update statistics
+            self._sql_generation_count += 1
+            if sql_result.get("sql"):
+                self._successful_sql_count += 1
+            
+            return sql_result
+            
+        finally:
+            conn.close()
+    
+    def _generate_sql_with_ner_rag(
+        self, 
+        context: AgentContext, 
+        conn: sqlite3.Connection, 
+        trace_id: str
+    ) -> Dict[str, Any]:
+        """
+        Generate SQL using NER-enhanced hybrid RAG
+        
+        Args:
+            context: Agent context
+            conn: Database connection
+            trace_id: Trace ID
+            
+        Returns:
+            Dictionary with SQL query and metadata
+        """
+        # Get enhanced schema snippets using NER + hybrid RAG
+        enhanced_schema_snippets = get_ner_enhanced_hybrid_schema_snippets(
+            conn, 
+            context.question, 
+            top_k=self.default_top_k, 
+            language_code=context.language
+        )
+        
+        # Create system prompt with enhanced schema information
+        system_prompt = self._create_system_prompt(enhanced_schema_snippets, context)
+        
+        # Generate SQL using LLM
+        response = self.llm_manager.generate_response(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Kullanıcı Sorusu (sanitize): {ner_result.sanitized_text}\n\nSQL Sorgusu:"}
+                {"role": "user", "content": f"User Question: {context.question}\n\nGenerate SQL Query:"}
             ],
-            max_tokens=300,
-            temperature=0.1
+            max_tokens=context.max_tokens,
+            temperature=context.temperature
         )
-        # capture usage for token metrics
-        try:
-            usage = response.get("usage", {})
-            if usage:
-                LAST_LLM_USAGE.update({
-                    "prompt_tokens": usage.get("prompt_tokens", 0),
-                    "completion_tokens": usage.get("completion_tokens", 0),
-                    "total_tokens": usage.get("total_tokens", 0),
-                })
-        except Exception:
-            pass
         
-        sql_query = response.get("content", "").strip()
+        # Extract and clean SQL query
+        sql_query = self._extract_and_clean_sql(response.get("content", ""))
         
-        # Clean up SQL query
-        if sql_query.startswith("```sql"):
-            sql_query = sql_query[6:]
-        if sql_query.endswith("```"):
-            sql_query = sql_query[:-3]
+        # Get usage information
+        usage = response.get("usage", {})
+        
+        return {
+            "sql": sql_query,
+            "schema_snippets": enhanced_schema_snippets,
+            "usage": usage,
+            "trace_id": trace_id,
+            "agent_name": self.agent_name
+        }
+    
+    def _create_system_prompt(self, schema_snippets: str, context: AgentContext) -> str:
+        """
+        Create system prompt for SQL generation
+        
+        Args:
+            schema_snippets: Enhanced schema snippets from NER-RAG
+            context: Agent context
+            
+        Returns:
+            Formatted system prompt
+        """
+        return f"""You are a medical database SQL expert. Generate accurate SQL queries for the given question.
+
+Database Schema Information:
+{schema_snippets}
+
+Important Guidelines:
+- Use only the provided schema information
+- Generate clean, efficient SQL queries
+- Use proper JOINs when needed
+- Include appropriate WHERE clauses
+- Use ORDER BY when using LIMIT
+- Handle multilingual text properly in queries
+- Focus on medical domain entities and relationships
+- Maximum SQL length: {self.max_sql_length} characters
+
+Question: {context.question}
+
+Generate SQL query:"""
+    
+    def _extract_and_clean_sql(self, raw_sql: str) -> str:
+        """
+        Extract and clean SQL query from LLM response
+        
+        Args:
+            raw_sql: Raw SQL response from LLM
+            
+        Returns:
+            Cleaned SQL query
+        """
+        if not raw_sql:
+            return ""
+        
+        # Remove code block markers
+        if raw_sql.startswith("```sql"):
+            raw_sql = raw_sql[6:]
+        elif raw_sql.startswith("```"):
+            raw_sql = raw_sql[3:]
+        
+        if raw_sql.endswith("```"):
+            raw_sql = raw_sql[:-3]
         
         # Extract only the first SQL statement (before semicolon)
-        sql_query = sql_query.strip()
+        sql_query = raw_sql.strip()
         if ';' in sql_query:
             sql_query = sql_query.split(';')[0].strip()
         
-        # Ensure it's a single SELECT statement and no data modification
-        sql_upper = sql_query.upper().strip()
-        dangerous_keywords = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'CREATE', 'TRUNCATE', 'REPLACE', 'EXEC', 'EXECUTE']
-        
-        if not sql_upper.startswith('SELECT'):
-            return generate_sql_fallback(question)
-            
-        # Check for dangerous keywords
-        for keyword in dangerous_keywords:
-            if keyword in sql_upper:
-                print(f"Security: Dangerous keyword '{keyword}' detected, using fallback")
-                return generate_sql_fallback(question)
-        
-        # Check for ORDER BY with LIMIT but no numeric columns
-        if 'ORDER BY' in sql_upper and 'LIMIT' in sql_upper:
-            # This is a basic check - in production you'd want to parse the ORDER BY clause
-            # and check if the column is numeric/date type
-            print("Info: ORDER BY with LIMIT detected - ensure column is numeric/date type")
-            
-            # Try to validate against schema if possible
-            try:
-                cursor = conn.cursor()
-                # Extract table name from query (basic approach)
-                if 'FROM' in sql_upper:
-                    table_part = sql_upper.split('FROM')[1].split()[0]
-                    # Check if table has numeric columns
-                    cursor.execute(f"PRAGMA table_info({table_part})")
-                    columns = cursor.fetchall()
-                    numeric_cols = [col[1] for col in columns if col[2].upper() in ['INTEGER', 'REAL', 'NUMERIC']]
-                    if not numeric_cols:
-                        print(f"Warning: Table {table_part} has no numeric columns for ORDER BY")
-            except Exception as e:
-                print(f"Schema validation error: {e}")
+        # Limit SQL length
+        if len(sql_query) > self.max_sql_length:
+            sql_query = sql_query[:self.max_sql_length]
+            self.logger.warning(f"SQL query truncated to {self.max_sql_length} characters")
         
         return sql_query
+    
+    def get_sql_statistics(self) -> Dict[str, Any]:
+        """Get SQL generation statistics"""
+        base_stats = self.get_performance_stats()
+        return {
+            **base_stats,
+            "sql_generation_count": self._sql_generation_count,
+            "successful_sql_count": self._successful_sql_count,
+            "sql_success_rate": (
+                self._successful_sql_count / self._sql_generation_count 
+                if self._sql_generation_count > 0 else 0.0
+            )
+        }
+    
+    def generate_sql(self, question: str, **kwargs) -> AgentResponse:
+        """
+        Convenience method to generate SQL for a question
         
-    except Exception as e:
-        print(f"LLM Error: {e}")
-        return generate_sql_fallback(question)
+        Args:
+            question: User question
+            **kwargs: Additional context parameters
+            
+        Returns:
+            AgentResponse with SQL result
+        """
+        context = AgentContext(
+            question=question,
+            language=kwargs.get("language", self.default_language),
+            max_tokens=kwargs.get("max_tokens", 300),
+            temperature=kwargs.get("temperature", 0.1),
+            user_id=kwargs.get("user_id"),
+            session_id=kwargs.get("session_id"),
+            additional_context=kwargs.get("additional_context")
+        )
+        
+        return self.execute(context)
 
 
-def generate_sql_fallback(question: str) -> str:
-    """Fallback SQL generation using heuristics"""
-    q = question.lower().strip()
-    
-    if "how many" in q or "kaç" in q or "count" in q or "toplam" in q:
-        if "patient" in q or "hasta" in q:
-            return "SELECT COUNT(*) AS total_patients FROM json_patients"
-        if "admission" in q or "yatış" in q:
-            return "SELECT COUNT(*) AS total_admissions FROM json_admissions"
-        if "provider" in q or "doktor" in q:
-            return "SELECT COUNT(*) AS total_providers FROM json_providers"
-        if "transfer" in q or "transfer" in q:
-            return "SELECT COUNT(*) AS total_transfers FROM json_transfers"
-        return "SELECT COUNT(*) AS total_records FROM json_patients"
-    
-    if "age" in q or "yaş" in q:
-        return "SELECT anchor_age FROM json_patients WHERE anchor_age IS NOT NULL LIMIT 10"
-    
-    if "gender" in q or "cinsiyet" in q:
-        return "SELECT gender, COUNT(*) FROM json_patients GROUP BY gender"
-    
-    if "admission" in q or "yatış" in q:
-        return "SELECT admittime, dischtime, admission_type FROM json_admissions LIMIT 10"
-    
-    if "provider" in q or "doktor" in q:
-        return "SELECT provider_id, npi FROM json_providers LIMIT 10"
-    
-    # Default query
-    return "SELECT COUNT(*) AS total_records FROM json_patients"
+# Global SQL Agent instance
+_sql_agent = None
 
+def get_sql_agent(config: Optional[Dict[str, Any]] = None) -> SQLAgent:
+    """
+    Get or create the global SQL agent instance
+    
+    Args:
+        config: Optional configuration for the agent
+        
+    Returns:
+        SQLAgent instance
+    """
+    global _sql_agent
+    if _sql_agent is None:
+        _sql_agent = SQLAgent(config)
+    return _sql_agent
 
-def generate_sql(question: str, conn: sqlite3.Connection) -> str:
-    """Main SQL generation function with dynamic schema support"""
-    # Try LLM first, fallback to heuristics
-    sql = generate_sql_with_llm(question, conn)
-    if not sql:
-        sql = generate_sql_fallback(question)
-    return sql
+def generate_sql_with_agent(question: str, **kwargs) -> AgentResponse:
+    """
+    Convenience function to generate SQL using the global agent
+    
+    Args:
+        question: User question
+        **kwargs: Additional parameters
+        
+    Returns:
+        AgentResponse with SQL result
+    """
+    agent = get_sql_agent()
+    return agent.generate_sql(question, **kwargs)

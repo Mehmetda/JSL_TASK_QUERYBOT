@@ -240,30 +240,31 @@ class DatabaseLoader:
         self.conn.commit()
         print(f"✅ Loaded {len(raw_json_data)} raw JSON files for backup")
     
-    def load_csv_data(self, csv_data: Dict[str, Any]):
+    def load_csv_data(self, csv_data: List[Dict[str, Any]]):
         """Load CSV data into separate tables"""
         cursor = self.conn.cursor()
         
-        for table_name, data in csv_data.items():
-            if isinstance(data, dict) and 'data' in data:
-                df = data['data']
-                source_file = data['source_file']
-                csv_file = data['csv_file']
-                
-                # Create table for CSV data
-                self.create_csv_table(table_name, df)
-                
-                # Insert data
-                row_count = self.insert_csv_data(table_name, df)
-                
-                # Register table
-                cursor.execute("""
-                    INSERT OR REPLACE INTO csv_tables 
-                    (table_name, description, source_file, row_count)
-                    VALUES (?, ?, ?, ?)
-                """, (table_name, f"Data from {csv_file}", source_file, row_count))
-                
-                print(f"✅ Created table {table_name} with {row_count} rows")
+        for data in csv_data:
+            table_name = data['table_name']
+            df = data['data']
+            source_file = data['source_file']
+            
+            print(f"📤 Loading {table_name} ({len(df)} rows)...")
+            
+            # Create table for CSV data
+            self.create_csv_table(table_name, df)
+            
+            # Insert data
+            row_count = self.insert_csv_data(table_name, df)
+            
+            # Register table
+            cursor.execute("""
+                INSERT OR REPLACE INTO csv_tables 
+                (table_name, description, source_file, row_count)
+                VALUES (?, ?, ?, ?)
+                """, (table_name, f"Data from {source_file}", source_file, row_count))
+            
+            print(f"✅ Created table {table_name} with {row_count} rows")
         
         self.conn.commit()
         print("✅ All CSV data loaded into separate tables")
@@ -274,9 +275,16 @@ class DatabaseLoader:
         
         # Generate column definitions
         columns = []
+        seen_columns = set()
+        
         for col in df.columns:
             col_name = col.replace(' ', '_').replace('-', '_').lower()
             col_name = f"_{col_name}" if col_name in ['id', 'key', 'value'] else col_name
+            
+            # Skip duplicate columns
+            if col_name in seen_columns:
+                continue
+            seen_columns.add(col_name)
             
             # Determine data type
             if df[col].dtype == 'int64':
@@ -288,11 +296,11 @@ class DatabaseLoader:
             
             columns.append(f"{col_name} {col_type}")
         
-        # Add metadata columns
-        columns.extend([
-            "source_file TEXT",
-            "created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
-        ])
+        # Add metadata columns only if they don't exist
+        if 'source_file' not in seen_columns:
+            columns.append("source_file TEXT")
+        if 'created_at' not in seen_columns:
+            columns.append("created_at DATETIME DEFAULT CURRENT_TIMESTAMP")
         
         # Create table
         create_sql = f"""

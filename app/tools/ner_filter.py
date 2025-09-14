@@ -65,7 +65,11 @@ def _mask_value(label: str, value: str, strategy: str = "placeholder") -> str:
 @dataclass
 class NERResult:
     sanitized_text: str
-    desired_entities: List[Dict[str, str]]
+    desired_entities: List[Dict[str, str]] = None
+    
+    def __post_init__(self):
+        if self.desired_entities is None:
+            self.desired_entities = []
 
 
 class SpaCyNERProvider:

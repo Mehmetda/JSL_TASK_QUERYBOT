@@ -37,33 +37,33 @@ def format_data_for_llm(rows: List[Tuple[Any, ...]]) -> str:
 def summarize_results_with_llm(question: str, rows: List[Tuple[Any, ...]]) -> str:
     """Use LLM to generate meaningful answer from SQL results"""
     if not rows:
-        return "Veritabanında bu soruya uygun veri bulunamadı."
+        return "No data found in the database for this question."
     
     try:
         # Format data for LLM
         formatted_data = format_data_for_llm(rows)
         
         # Create prompt for LLM with better formatting
-        prompt = f"""Sen bir tıbbi veritabanı uzmanısın. Kullanıcının sorusuna veritabanı sonuçlarına dayanarak düzenli ve anlamlı bir Türkçe cevap ver.
+        prompt = f"""You are a medical database expert. Provide a clear and meaningful English answer based on the database results for the user's question.
 
-Kullanıcı Sorusu: {question}
+User Question: {question}
 
-Veritabanı Sonuçları:
+Database Results:
 {formatted_data}
 
-Toplam {len(rows)} kayıt bulundu.
+Total {len(rows)} records found.
 
-Lütfen cevabı şu formatta ver:
-1. **Ana Cevap**: Kullanıcının sorusuna doğrudan cevap
-2. **Detaylar**: Önemli sayısal veriler ve istatistikler
-3. **Özet**: Genel değerlendirme
+Please provide the answer in this format:
+1. **Main Answer**: Direct answer to the user's question
+2. **Details**: Important numerical data and statistics
+3. **Summary**: General assessment
 
-Cevap:"""
+Answer:"""
 
         # Call LLM
         response = llm_manager.generate_response(
             messages=[
-                {"role": "system", "content": "Sen bir tıbbi veritabanı uzmanısın. Veritabanı sonuçlarını analiz edip kullanıcıya anlamlı cevaplar veriyorsun."},
+                {"role": "system", "content": "You are a medical database expert. You analyze database results and provide meaningful answers to users in English."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=300,
@@ -85,13 +85,13 @@ Cevap:"""
         
         # If content is empty, provide a fallback answer
         if not content:
-            return f"Veritabanında {len(rows)} kayıt bulunmaktadır. Detaylı analiz için LLM yanıtı alınamadı."
+            return f"Found {len(rows)} records in the database. Could not get detailed analysis from LLM."
         
         return content
         
     except Exception as e:
         print(f"LLM Error in summarization: {e}")
-        return f"Veritabanında {len(rows)} kayıt bulunmaktadır. (LLM hatası: {str(e)})"
+        return f"Found {len(rows)} records in the database. (LLM error: {str(e)})"
 
 
 def summarize_results(question: str, rows: List[Tuple[Any, ...]]) -> str:

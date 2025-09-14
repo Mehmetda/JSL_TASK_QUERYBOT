@@ -51,7 +51,8 @@ class ETLPipeline:
             
             # Load CSV data
             print("\n📤 Loading CSV data...")
-            self.loader.load_csv_data(transformed_data['transformed_csv'])
+            csv_data_list = list(transformed_data['transformed_csv'].values())
+            self.loader.load_csv_data(csv_data_list)
             
             # Get summary
             print("\n📊 Database Summary:")

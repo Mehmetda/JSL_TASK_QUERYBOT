@@ -2,7 +2,7 @@
 Dynamic System Prompt Generator for Medical QueryBot
 """
 import sqlite3
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from math import sqrt
 
 # Lazy embedding model holder
@@ -129,122 +129,122 @@ def generate_system_prompt(conn: sqlite3.Connection) -> str:
     
     schema_info = get_database_schema_info(conn)
     
-    system_prompt = f"""Sen bir tıbbi veritabanı uzmanısın ve SQLite veritabanı üzerinde çalışıyorsun. Kullanıcıların doğal dil sorularını SQL sorgularına dönüştürmek için tasarlandın.
+    system_prompt = f"""You are a medical database expert working with SQLite databases. You are designed to convert natural language questions into SQL queries for medical data analysis.
 
-## 🏥 VERİTABANI ŞEMASI
+## 🏥 DATABASE SCHEMA
 
 {schema_info}
 
-## 🔗 TABLO İLİŞKİLERİ
+## 🔗 TABLE RELATIONSHIPS
 
-- **json_patients** ↔ **json_admissions**: subject_id ile bağlantılı
-- **json_admissions** ↔ **json_transfers**: hadm_id ile bağlantılı  
-- **json_admissions** ↔ **json_providers**: admit_provider_id ile bağlantılı
-- **json_patients** ↔ **json_transfers**: subject_id ile bağlantılı
+- **json_patients** ↔ **json_admissions**: Connected by subject_id
+- **json_admissions** ↔ **json_transfers**: Connected by hadm_id  
+- **json_admissions** ↔ **json_providers**: Connected by admit_provider_id
+- **json_patients** ↔ **json_transfers**: Connected by subject_id
 
-## 📊 VERİ TİPLERİ VE AÇIKLAMALAR
+## 📊 DATA TYPES AND DESCRIPTIONS
 
-### Hasta Bilgileri (json_patients)
-- **subject_id**: Hasta benzersiz kimliği
-- **gender**: Cinsiyet (M/F)
-- **anchor_age**: Yaş
-- **anchor_year**: Referans yılı
-- **dod**: Ölüm tarihi (varsa)
+### Patient Information (json_patients)
+- **subject_id**: Unique patient identifier
+- **gender**: Gender (M/F)
+- **anchor_age**: Age
+- **anchor_year**: Reference year
+- **dod**: Date of death (if applicable)
 
-### Yatış Bilgileri (json_admissions)  
-- **hadm_id**: Yatış benzersiz kimliği
-- **admittime**: Yatış zamanı
-- **dischtime**: Çıkış zamanı
-- **admission_type**: Yatış tipi (EMERGENCY, ELECTIVE, vb.)
-- **admission_location**: Yatış yeri
-- **discharge_location**: Çıkış yeri
-- **insurance**: Sigorta bilgisi
-- **race**: Irk bilgisi
-- **marital_status**: Medeni durum
+### Admission Information (json_admissions)  
+- **hadm_id**: Unique admission identifier
+- **admittime**: Admission time
+- **dischtime**: Discharge time
+- **admission_type**: Type of admission (EMERGENCY, ELECTIVE, etc.)
+- **admission_location**: Admission location
+- **discharge_location**: Discharge location
+- **insurance**: Insurance information
+- **race**: Race information
+- **marital_status**: Marital status
 
-### Transfer Bilgileri (json_transfers)
-- **transfer_id**: Transfer benzersiz kimliği
-- **eventtype**: Transfer tipi (admit, transfer, discharge)
-- **careunit**: Bakım birimi
-- **intime**: Giriş zamanı
-- **outtime**: Çıkış zamanı
+### Transfer Information (json_transfers)
+- **transfer_id**: Unique transfer identifier
+- **eventtype**: Transfer type (admit, transfer, discharge)
+- **careunit**: Care unit
+- **intime**: Entry time
+- **outtime**: Exit time
 
-### Sağlık Personeli (json_providers)
-- **provider_id**: Personel kimliği
-- **npi**: Ulusal sağlık personeli kimliği
-- **dea**: DEA numarası
+### Healthcare Providers (json_providers)
+- **provider_id**: Provider identifier
+- **npi**: National Provider Identifier
+- **dea**: DEA number
 
-## 🎯 SORU TİPLERİ VE ÖRNEKLER
+## 🎯 QUERY TYPES AND EXAMPLES
 
-### Sayısal Sorgular
-- "Kaç hasta var?" → `SELECT COUNT(*) FROM json_patients`
-- "Kaç yatış var?" → `SELECT COUNT(*) FROM json_admissions`
-- "Kaç transfer var?" → `SELECT COUNT(*) FROM json_transfers`
+### Count Queries
+- "How many patients are there?" → `SELECT COUNT(*) FROM json_patients`
+- "How many admissions are there?" → `SELECT COUNT(*) FROM json_admissions`
+- "How many transfers are there?" → `SELECT COUNT(*) FROM json_transfers`
 
-### Demografik Sorgular
-- "Hastaların yaş dağılımı nasıl?" → `SELECT anchor_age, COUNT(*) FROM json_patients GROUP BY anchor_age`
-- "Cinsiyet dağılımı nedir?" → `SELECT gender, COUNT(*) FROM json_patients GROUP BY gender`
-- "Hangi ırktan kaç hasta var?" → `SELECT race, COUNT(*) FROM json_admissions GROUP BY race`
+### Demographic Queries
+- "What is the age distribution of patients?" → `SELECT anchor_age, COUNT(*) FROM json_patients GROUP BY anchor_age`
+- "What is the gender distribution?" → `SELECT gender, COUNT(*) FROM json_patients GROUP BY gender`
+- "How many patients by race?" → `SELECT race, COUNT(*) FROM json_admissions GROUP BY race`
 
-### Yatış Sorguları
-- "Acil yatışlar kaç tane?" → `SELECT COUNT(*) FROM json_admissions WHERE admission_type = 'EMERGENCY'`
-- "Hangi yatış yerlerinden kaç hasta geldi?" → `SELECT admission_location, COUNT(*) FROM json_admissions GROUP BY admission_location`
-- "Sigorta türlerine göre dağılım?" → `SELECT insurance, COUNT(*) FROM json_admissions GROUP BY insurance`
+### Admission Queries
+- "How many emergency admissions?" → `SELECT COUNT(*) FROM json_admissions WHERE admission_type = 'EMERGENCY'`
+- "How many patients by admission location?" → `SELECT admission_location, COUNT(*) FROM json_admissions GROUP BY admission_location`
+- "Distribution by insurance type?" → `SELECT insurance, COUNT(*) FROM json_admissions GROUP BY insurance`
 
-### Transfer Sorguları
-- "Hangi bakım birimlerinde kaç transfer var?" → `SELECT careunit, COUNT(*) FROM json_transfers GROUP BY careunit`
-- "Transfer tiplerine göre dağılım?" → `SELECT eventtype, COUNT(*) FROM json_transfers GROUP BY eventtype`
+### Transfer Queries
+- "How many transfers by care unit?" → `SELECT careunit, COUNT(*) FROM json_transfers GROUP BY careunit`
+- "Distribution by transfer type?" → `SELECT eventtype, COUNT(*) FROM json_transfers GROUP BY eventtype`
 
-### Zaman Bazlı Sorgular
-- "Son 30 günde kaç yatış var?" → `SELECT COUNT(*) FROM json_admissions WHERE admittime >= date('now', '-30 days')`
-- "2024 yılında kaç hasta geldi?" → `SELECT COUNT(*) FROM json_admissions WHERE strftime('%Y', admittime) = '2024'`
-- "En son yatış ne zaman?" → `SELECT admittime, dischtime, admission_type FROM json_admissions ORDER BY admittime DESC LIMIT 1`
-- "En yeni 5 yatış" → `SELECT admittime, dischtime, admission_type FROM json_admissions ORDER BY admittime DESC LIMIT 5`
+### Time-based Queries
+- "How many admissions in the last 30 days?" → `SELECT COUNT(*) FROM json_admissions WHERE admittime >= date('now', '-30 days')`
+- "How many patients in 2024?" → `SELECT COUNT(*) FROM json_admissions WHERE strftime('%Y', admittime) = '2024'`
+- "What was the last admission?" → `SELECT admittime, dischtime, admission_type FROM json_admissions ORDER BY admittime DESC LIMIT 1`
+- "Show the 5 most recent admissions" → `SELECT admittime, dischtime, admission_type FROM json_admissions ORDER BY admittime DESC LIMIT 5`
 
-### İlişkisel Sorgular
-- "Hangi hastalar birden fazla yatış yapmış?" → `SELECT subject_id, COUNT(*) FROM json_admissions GROUP BY subject_id HAVING COUNT(*) > 1`
-- "Hangi doktorlar en çok hasta kabul etmiş?" → `SELECT admit_provider_id, COUNT(*) FROM json_admissions GROUP BY admit_provider_id ORDER BY COUNT(*) DESC`
+### Relational Queries
+- "Which patients have multiple admissions?" → `SELECT subject_id, COUNT(*) FROM json_admissions GROUP BY subject_id HAVING COUNT(*) > 1`
+- "Which providers have the most patients?" → `SELECT admit_provider_id, COUNT(*) FROM json_admissions GROUP BY admit_provider_id ORDER BY COUNT(*) DESC`
 
-## ⚠️ ÖNEMLİ KURALLAR - VERİ GÜVENLİĞİ
+## ⚠️ IMPORTANT RULES - DATA SECURITY
 
-1. **SADECE SELECT sorguları** oluştur - INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, REPLACE YASAK
-2. **Tek SQL statement** döndür - Birden fazla statement yasak
-3. **Noktalı virgül kullanma** - SQL statement sonunda ; koyma
-4. **Güvenli sorgular** yaz - SQL injection'a karşı dikkatli ol
-5. **JOIN kullan** - İlişkili tabloları birleştir
-6. **Türkçe cevap ver** - Kullanıcı Türkçe soruyorsa Türkçe yanıtla
-7. **Anlamlı sonuçlar** döndür - Sadece sayı değil, açıklama da ekle
-8. **Hata durumunda** - Veri bulunamazsa açık mesaj ver
-9. **LIMIT kullanırken ORDER BY zorunlu** - LIMIT kullanacaksan mutlaka ORDER BY ekle
-10. **ORDER BY için numeric/tarih kolonu gerekli** - ORDER BY kullanacaksan kolonun INTEGER, REAL, DATE, DATETIME olması lazım
-11. **Numeric kolon yoksa LIMIT kullanma** - Eğer ORDER BY yapabilecek numeric/tarih kolonu yoksa LIMIT kullanma
-12. **En son/en yeni** soruları için ORDER BY ... DESC LIMIT 1 kullan (sadece numeric/tarih kolonlarla)
-13. **Şema analizi yap** - Her tablo için ORDER BY uygun kolonları kontrol et
-14. **VERİ DEĞİŞTİRME YASAK** - Hiçbir şekilde veri ekleme, silme, güncelleme yapma
-15. **SADECE OKUMA** - Sadece mevcut verileri okuyup raporla
+1. **ONLY SELECT queries** - INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, REPLACE are FORBIDDEN
+2. **Single SQL statement** - Multiple statements are forbidden
+3. **No semicolon** - Don't add ; at the end of SQL statements
+4. **Safe queries** - Be careful against SQL injection
+5. **Use JOINs** - Connect related tables
+6. **English responses** - Always respond in English unless specifically asked for another language
+7. **Meaningful results** - Don't just return numbers, add explanations
+8. **Error handling** - Give clear messages when no data is found
+9. **ORDER BY required with LIMIT** - If using LIMIT, always add ORDER BY
+10. **Numeric/date columns for ORDER BY** - ORDER BY requires INTEGER, REAL, DATE, DATETIME columns
+11. **No LIMIT without ORDER BY** - Don't use LIMIT if no suitable numeric/date column for ORDER BY
+12. **Latest/newest queries** - Use ORDER BY ... DESC LIMIT 1 for latest/newest (only with numeric/date columns)
+13. **Schema analysis** - Check ORDER BY suitable columns for each table
+14. **NO DATA MODIFICATION** - Never insert, delete, or update data
+15. **READ ONLY** - Only read and report existing data
 
-## 🔍 SORU ANALİZİ
+## 🔍 QUESTION ANALYSIS
 
-Kullanıcı sorusunu analiz et:
-1. **Ana konu**: Hasta, yatış, transfer, personel?
-2. **Sorgu tipi**: Sayım, dağılım, filtreleme, ilişki?
-3. **Zaman aralığı**: Belirli tarih, dönem?
-4. **Gruplama**: Hangi alana göre grupla?
-5. **Sıralama**: Hangi kritere göre sırala?
+Analyze the user's question:
+1. **Main topic**: Patient, admission, transfer, provider?
+2. **Query type**: Count, distribution, filtering, relationship?
+3. **Time range**: Specific date, period?
+4. **Grouping**: Group by which field?
+5. **Sorting**: Sort by which criteria?
 
-## 📝 ÖRNEK ÇIKTI FORMATI
+## 📝 EXAMPLE OUTPUT FORMAT
 
 ```sql
--- Kullanıcı sorusu: "Kaç erkek hasta var?"
+-- User question: "How many male patients are there?"
 SELECT 
     gender,
-    COUNT(*) as hasta_sayisi
+    COUNT(*) as patient_count
 FROM json_patients 
 WHERE gender = 'M'
-GROUP BY gender;
+GROUP BY gender
 ```
 
-Bu sistem prompt'u kullanarak kullanıcıların doğal dil sorularını doğru SQL sorgularına dönüştür ve anlamlı sonuçlar üret."""
+Use this system prompt to convert users' natural language questions into correct SQL queries and produce meaningful results."""
 
     return system_prompt
 
@@ -255,31 +255,31 @@ def get_enhanced_system_prompt(conn: sqlite3.Connection) -> str:
     # Add additional context
     enhanced_prompt = f"""{base_prompt}
 
-## 🚀 GELİŞMİŞ ÖZELLİKLER
+## 🚀 ADVANCED FEATURES
 
-### Akıllı Varsayımlar
-- Kullanıcı "hasta" dediğinde → json_patients tablosu
-- Kullanıcı "yatış" dediğinde → json_admissions tablosu  
-- Kullanıcı "transfer" dediğinde → json_transfers tablosu
-- Kullanıcı "doktor/personel" dediğinde → json_providers tablosu
+### Smart Assumptions
+- When user says "patient" → json_patients table
+- When user says "admission" → json_admissions table  
+- When user says "transfer" → json_transfers table
+- When user says "doctor/provider" → json_providers table
 
-### Türkçe-İngilizce Eşleştirme
-- hasta → patient
-- yatış → admission
+### Multi-language Support
+- patient → patient
+- admission → admission
 - transfer → transfer
-- doktor → provider
-- yaş → age
-- cinsiyet → gender
-- yatış yeri → admission_location
-- çıkış yeri → discharge_location
+- doctor → provider
+- age → age
+- gender → gender
+- admission location → admission_location
+- discharge location → discharge_location
 
-### Yaygın Hata Düzeltmeleri
-- "hastane" → "hospital" (veritabanında yok, admission_location kullan)
-- "klinik" → "careunit" 
-- "servis" → "careunit"
-- "bölüm" → "careunit"
+### Common Error Corrections
+- "hospital" → use admission_location (not in database)
+- "clinic" → careunit 
+- "service" → careunit
+- "department" → careunit
 
-Bu bilgileri kullanarak kullanıcı sorularını en doğru şekilde SQL sorgularına dönüştür."""
+Use this information to convert user questions into the most accurate SQL queries."""
 
     return enhanced_prompt
 
@@ -522,3 +522,361 @@ def _build_schema_docs(conn: sqlite3.Connection) -> List[Dict[str, str]]:
         print(f"Error building schema docs: {e}")
     
     return docs
+
+
+def get_ner_enhanced_hybrid_schema_snippets(
+    conn: sqlite3.Connection, 
+    question: str, 
+    top_k: int = 3,
+    language_code: str = "tr"
+) -> str:
+    """
+    Get relevant schema snippets using NER-enhanced hybrid approach
+    
+    This function:
+    1. Extracts entities from the question using NER
+    2. Uses entities to create metadata filters for more targeted retrieval
+    3. Combines semantic similarity with entity-based filtering
+    4. Enhances retrieval with domain-specific terms and IDs
+    
+    Args:
+        conn: Database connection
+        question: User question
+        top_k: Number of top relevant snippets to return
+        language_code: Language code for NER processing
+        
+    Returns:
+        Relevant schema snippets as string with NER context
+    """
+    try:
+        # Import NER components
+        from app.tools.ner_filter import SpaCyNERProvider, build_system_context_block
+        
+        # Extract entities using NER (default to English)
+        ner = SpaCyNERProvider(language_code=language_code or "en")
+        ner_result = ner.filter_and_deidentify(question)
+        
+        # Create metadata filters from extracted entities
+        metadata_filters = _create_metadata_filters_from_entities(ner_result.desired_entities)
+        
+        # Get schema documents
+        docs = _build_schema_docs(conn)
+        if not docs:
+            return "No schema information available."
+        
+        # Apply entity-based metadata filtering
+        if metadata_filters:
+            filtered_docs = _apply_metadata_filters(docs, metadata_filters)
+            # If we have filtered results, use them; otherwise use all docs
+            docs = filtered_docs if filtered_docs else docs
+        
+        # Extract texts for embedding
+        texts = [doc.get("text", "") for doc in docs]
+        
+        # Enhance question with domain terms for better semantic matching
+        enhanced_question = _enhance_question_with_domain_terms(question, ner_result.desired_entities)
+        
+        # Get embeddings
+        question_embedding = _embed_texts([enhanced_question])[0]
+        doc_embeddings = _embed_texts(texts)
+        
+        # Calculate similarities
+        similarities = []
+        for i, doc_embedding in enumerate(doc_embeddings):
+            similarity = _cosine(question_embedding, doc_embedding)
+            similarities.append((similarity, docs[i]))
+        
+        # Sort by similarity and take top_k
+        similarities.sort(key=lambda x: x[0], reverse=True)
+        top_docs = similarities[:top_k]
+        
+        # Format results with NER context
+        result_parts = []
+        
+        # Add NER context header
+        entity_context = build_system_context_block(ner_result.desired_entities)
+        if entity_context and entity_context != "None":
+            result_parts.append(f"## Extracted Entities and Domain Terms:\n{entity_context}\n")
+        
+        # Add schema snippets
+        for similarity, doc in top_docs:
+            table = doc.get("table", "")
+            column = doc.get("column", "")
+            text = doc.get("text", "")
+            result_parts.append(f"Table: {table}, Column: {column} (similarity: {similarity:.3f})\n{text}")
+        
+        return "\n\n".join(result_parts)
+        
+    except Exception as e:
+        print(f"Error getting NER-enhanced hybrid schema snippets: {e}")
+        # Fallback to regular hybrid approach
+        return get_hybrid_relevant_schema_snippets(conn, question, top_k)
+
+
+def _create_metadata_filters_from_entities(entities: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    """
+    Create metadata filters from NER entities for targeted schema retrieval
+    
+    Args:
+        entities: List of extracted entities from NER
+        
+    Returns:
+        Dictionary of metadata filters or None
+    """
+    if not entities:
+        return None
+    
+    filters = {}
+    table_priority = []
+    
+    # Enhanced entity mapping with comprehensive medical domain coverage
+    entity_mapping = {
+        "PERSON": {
+            "columns": ["subject_id", "admit_provider_id", "discharge_provider_id"],
+            "tables": ["json_patients", "json_admissions", "json_providers"],
+            "priority": 1
+        },
+        "ORG": {
+            "columns": ["admission_location", "discharge_location", "careunit"],
+            "tables": ["json_admissions", "json_transfers"],
+            "priority": 2
+        },
+        "GPE": {
+            "columns": ["admission_location", "discharge_location"],
+            "tables": ["json_admissions"],
+            "priority": 3
+        },
+        "DATE": {
+            "columns": ["admittime", "dischtime", "deathtime", "intime", "outtime"],
+            "tables": ["json_admissions", "json_transfers"],
+            "priority": 2
+        },
+        "TIME": {
+            "columns": ["admittime", "dischtime", "intime", "outtime"],
+            "tables": ["json_admissions", "json_transfers"],
+            "priority": 2
+        },
+        "CARDINAL": {
+            "columns": ["age", "anchor_age", "hospital_expire_flag"],
+            "tables": ["json_patients", "json_admissions"],
+            "priority": 1
+        },
+        "ORDINAL": {
+            "columns": ["admission_type", "insurance", "marital_status"],
+            "tables": ["json_admissions"],
+            "priority": 2
+        },
+        "MONEY": {
+            "columns": ["insurance"],
+            "tables": ["json_admissions"],
+            "priority": 3
+        },
+        "PERCENT": {
+            "columns": ["hospital_expire_flag"],
+            "tables": ["json_admissions"],
+            "priority": 3
+        },
+        "SUBJECT_ID": {
+            "columns": ["subject_id"],
+            "tables": ["json_patients", "json_admissions", "json_transfers"],
+            "priority": 1
+        },
+        "HADM_ID": {
+            "columns": ["hadm_id"],
+            "tables": ["json_admissions", "json_transfers"],
+            "priority": 1
+        },
+        "PROVIDER_ID": {
+            "columns": ["admit_provider_id", "discharge_provider_id"],
+            "tables": ["json_admissions", "json_providers"],
+            "priority": 2
+        },
+        "DOMAIN_TERM": {
+            "columns": ["admission_type", "careunit", "insurance"],
+            "tables": ["json_admissions", "json_transfers"],
+            "priority": 2
+        }
+    }
+    
+    # Process entities and build comprehensive filters
+    for entity in entities:
+        label = entity.get("label", "").upper()
+        value = entity.get("value", "").lower()
+        
+        if label in entity_mapping:
+            mapping = entity_mapping[label]
+            
+            # Add table priority
+            for table in mapping["tables"]:
+                if table not in [t[0] for t in table_priority]:
+                    table_priority.append((table, mapping["priority"]))
+            
+            # Add column-specific filters with entity context
+            for column in mapping["columns"]:
+                if column not in filters:
+                    filters[column] = value
+                else:
+                    # Combine multiple values for the same column
+                    if isinstance(filters[column], list):
+                        filters[column].append(value)
+                    else:
+                        filters[column] = [filters[column], value]
+    
+    # Sort tables by priority and select the most relevant ones
+    if table_priority:
+        table_priority.sort(key=lambda x: x[1])
+        top_tables = [table for table, _ in table_priority[:3]]  # Top 3 tables
+        filters["tables"] = top_tables
+    
+    # Add entity context for better retrieval
+    filters["entity_context"] = {
+        "entities": entities,
+        "entity_count": len(entities),
+        "entity_types": list(set([e.get("label", "") for e in entities]))
+    }
+    
+    return filters if filters else None
+
+
+def _apply_metadata_filters(docs: List[Dict[str, str]], filters: Dict[str, str]) -> List[Dict[str, str]]:
+    """
+    Apply metadata filters to schema documents with enhanced matching
+    
+    Args:
+        docs: List of schema documents
+        filters: Dictionary of metadata filters
+        
+    Returns:
+        Filtered list of documents
+    """
+    if not filters:
+        return docs
+    
+    filtered = []
+    
+    for doc in docs:
+        match_score = 0
+        total_checks = 0
+        
+        # Check table filters
+        if "tables" in filters:
+            total_checks += 1
+            doc_table = doc.get("table", "").lower()
+            filter_tables = [t.lower() for t in filters["tables"]]
+            if any(table in doc_table for table in filter_tables):
+                match_score += 1
+        
+        # Check column filters
+        for key, value in filters.items():
+            if key in ["tables", "entity_context"]:
+                continue
+                
+            total_checks += 1
+            if key in doc:
+                doc_value = str(doc[key]).lower()
+                filter_value = str(value).lower()
+                
+                # Enhanced matching logic
+                if isinstance(value, list):
+                    # Multiple values for the same column
+                    if any(v.lower() in doc_value for v in value):
+                        match_score += 1
+                else:
+                    # Single value matching
+                    if filter_value in doc_value or doc_value in filter_value:
+                        match_score += 1
+            else:
+                # Check if the filter key matches any column name
+                doc_columns = [str(v).lower() for v in doc.values()]
+                if any(key.lower() in col for col in doc_columns):
+                    match_score += 1
+        
+        # Include document if it matches at least 50% of the criteria
+        if total_checks > 0 and (match_score / total_checks) >= 0.5:
+            # Add match score to document for ranking
+            doc["match_score"] = match_score / total_checks
+            filtered.append(doc)
+    
+    # Sort by match score for better ranking
+    filtered.sort(key=lambda x: x.get("match_score", 0), reverse=True)
+    
+    return filtered
+
+
+def _enhance_question_with_domain_terms(question: str, entities: List[Dict[str, str]]) -> str:
+    """
+    Enhance the question with domain terms for better semantic matching
+    
+    Args:
+        question: Original question
+        entities: Extracted entities from NER
+        
+    Returns:
+        Enhanced question with domain context
+    """
+    if not entities:
+        return question
+    
+    # Extract domain terms and IDs with enhanced categorization
+    domain_terms = []
+    medical_terms = []
+    temporal_terms = []
+    numeric_terms = []
+    id_terms = []
+    
+    for entity in entities:
+        label = entity.get("label", "").upper()
+        value = entity.get("value", "")
+        
+        if label == "DOMAIN_TERM":
+            medical_terms.append(value)
+        elif label in ["SUBJECT_ID", "HADM_ID", "PROVIDER_ID"]:
+            id_terms.append(f"{label.lower()}: {value}")
+        elif label in ["DATE", "TIME", "ADMITTIME", "DISCHTIME"]:
+            temporal_terms.append(f"{label.lower()}: {value}")
+        elif label in ["CARDINAL", "ORDINAL", "MONEY", "PERCENT"]:
+            numeric_terms.append(f"{label.lower()}: {value}")
+        elif label in ["PERSON", "ORG", "GPE"]:
+            medical_terms.append(f"{label.lower()}: {value}")
+    
+    # Build enhanced question with structured context
+    enhanced_parts = [question]
+    
+    if medical_terms:
+        enhanced_parts.append(f"Medical entities: {', '.join(medical_terms)}")
+    
+    if id_terms:
+        enhanced_parts.append(f"Database IDs: {', '.join(id_terms)}")
+    
+    if temporal_terms:
+        enhanced_parts.append(f"Temporal context: {', '.join(temporal_terms)}")
+    
+    if numeric_terms:
+        enhanced_parts.append(f"Numeric values: {', '.join(numeric_terms)}")
+    
+    # Add medical domain synonyms for better semantic matching
+    medical_synonyms = []
+    question_lower = question.lower()
+    
+    if any(term in question_lower for term in ["patient", "hasta", "person"]):
+        medical_synonyms.extend(["patient", "subject", "individual"])
+    
+    if any(term in question_lower for term in ["admission", "yatış", "hospital"]):
+        medical_synonyms.extend(["admission", "hospitalization", "stay"])
+    
+    if any(term in question_lower for term in ["doctor", "doktor", "provider"]):
+        medical_synonyms.extend(["provider", "physician", "doctor", "clinician"])
+    
+    if any(term in question_lower for term in ["age", "yaş", "old"]):
+        medical_synonyms.extend(["age", "years", "demographics"])
+    
+    if any(term in question_lower for term in ["gender", "cinsiyet", "sex"]):
+        medical_synonyms.extend(["gender", "sex", "demographics"])
+    
+    if medical_synonyms:
+        enhanced_parts.append(f"Medical synonyms: {', '.join(set(medical_synonyms))}")
+    
+    if len(enhanced_parts) > 1:
+        return "\n\n".join(enhanced_parts)
+    
+    return question

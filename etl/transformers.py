@@ -109,15 +109,13 @@ class CSVTransformer:
         table_name = csv_data['table_name']
         df = csv_data['data']
         source_file = csv_data['source_file']
-        csv_file = csv_data['csv_file']
         
         # Clean column names
         df.columns = [col.replace(' ', '_').replace('-', '_').lower() for col in df.columns]
         
-        # Add metadata columns
-        df['source_file'] = source_file
-        df['csv_file'] = csv_file
-        df['created_at'] = datetime.now().isoformat()
+        # Add metadata columns only if they don't exist
+        if 'created_at' not in df.columns:
+            df['created_at'] = datetime.now().isoformat()
         
         # Store transformed data
         self.csv_tables[table_name] = df
@@ -125,8 +123,7 @@ class CSVTransformer:
         return {
             'table_name': table_name,
             'data': df,
-            'source_file': source_file,
-            'csv_file': csv_file
+            'source_file': source_file
         }
     
     def get_transformed_data(self) -> Dict[str, pd.DataFrame]:

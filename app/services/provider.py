@@ -28,12 +28,15 @@ class ServiceProvider:
         return TableAllowlistManager()
 
     # RAG / Retrieval helpers
-    def get_relevant_schema(self, conn, question: str, top_k: int = 3, metadata_filters: Optional[dict] = None) -> str:
+    def get_relevant_schema(self, conn, question: str, top_k: int = 3, metadata_filters: Optional[dict] = None, use_ner_enhanced: bool = True) -> str:
         from app.agents.system_prompt import (
+            get_ner_enhanced_hybrid_schema_snippets,
             get_hybrid_relevant_schema_snippets_with_metadata,
             get_relevant_schema_snippets,
         )
-        if metadata_filters:
+        if use_ner_enhanced:
+            return get_ner_enhanced_hybrid_schema_snippets(conn, question, top_k)
+        elif metadata_filters:
             return get_hybrid_relevant_schema_snippets_with_metadata(conn, question, metadata_filters, top_k)
         return get_relevant_schema_snippets(conn, question, top_k)
 

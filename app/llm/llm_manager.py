@@ -1,49 +1,64 @@
 """
-LLM Manager for handling OpenAI and Local LLM switching
+LLM Manager for handling OpenAI and Ollama LLM switching
+
+This manager provides automatic fallback from OpenAI to Ollama when needed.
+OpenAI is used as the primary LLM, with Ollama as fallback for offline scenarios.
 """
 import os
 import logging
 from typing import Dict, Any, List
-from app.llm import get_local_llm_client
+from app.llm.ollama_client import get_ollama_client, test_ollama_connection
 from app.utils import check_internet_connection, check_openai_availability
+from config import get_openai_model, get_ollama_model, is_openai_configured
 
 logger = logging.getLogger(__name__)
 
 class LLMManager:
-    """Manages LLM selection and automatic fallback"""
+    """Manages LLM selection and automatic fallback between OpenAI and Ollama"""
     
     def __init__(self):
-        self.current_mode = "auto"  # "openai", "local", "auto"
-        self.local_client = None
+        self.current_mode = "auto"  # "openai", "ollama", "auto"
+        self.ollama_client = None
         self.openai_client = None
+        self.openai_model = get_openai_model()
+        self.ollama_model = get_ollama_model()
         self._initialize_clients()
     
     def _initialize_clients(self):
-        """Initialize both clients"""
+        """Initialize both OpenAI and Ollama clients"""
+        # Initialize OpenAI client
         try:
-            # Initialize local client
-            self.local_client = get_local_llm_client()
-            logger.info("Local LLM client initialized")
-        except Exception as e:
-            logger.error(f"Failed to initialize local LLM: {e}")
-            self.local_client = None
-        
-        try:
-            # Initialize OpenAI client
-            from openai import OpenAI
-            api_key = os.getenv("OPENAI_API_KEY")
-            if api_key:
+            if is_openai_configured():
+                from openai import OpenAI
+                api_key = os.getenv("OPENAI_API_KEY")
                 self.openai_client = OpenAI(api_key=api_key)
-                logger.info("OpenAI client initialized")
+                logger.info(f"OpenAI client initialized with model: {self.openai_model}")
             else:
-                logger.warning("No OpenAI API key found")
+                logger.warning("OpenAI API key not configured")
+                self.openai_client = None
         except Exception as e:
             logger.error(f"Failed to initialize OpenAI client: {e}")
             self.openai_client = None
         
+        # Initialize Ollama client
+        try:
+            self.ollama_client = get_ollama_client(self.ollama_model)
+            # Test connection
+            connection_test = self.ollama_client.test_connection()
+            if connection_test["available"]:
+                logger.info(f"Ollama client initialized with model: {self.ollama_model}")
+            else:
+                logger.warning(f"Ollama server not available: {connection_test.get('error', 'Unknown error')}")
+                self.ollama_client = None
+        except Exception as e:
+            logger.error(f"Failed to initialize Ollama client: {e}")
+            self.ollama_client = None
+        
     
     def set_mode(self, mode: str):
-        """Set LLM mode: 'openai', 'local', or 'auto'"""
+        """Set LLM mode: 'openai', 'ollama', or 'auto'"""
+        if mode not in ["openai", "ollama", "auto"]:
+            raise ValueError(f"Invalid mode: {mode}. Must be 'openai', 'ollama', or 'auto'")
         self.current_mode = mode
         logger.info(f"LLM mode set to: {mode}")
     
@@ -52,8 +67,8 @@ class LLMManager:
         modes = []
         if self.openai_client:
             modes.append("openai")
-        if self.local_client:
-            modes.append("local")
+        if self.ollama_client:
+            modes.append("ollama")
         if len(modes) > 1:
             modes.append("auto")
         return modes
@@ -66,36 +81,53 @@ class LLMManager:
         """Get the effective mode that will be used for generation"""
         if self.current_mode == "auto":
             # Check internet and OpenAI availability first
-            if check_internet_connection() and check_openai_availability():
+            if check_internet_connection() and check_openai_availability() and self.openai_client:
                 return "openai"
-            # Fallback to local
+            # Fallback to Ollama
+            elif self.ollama_client:
+                return "ollama"
             else:
-                return "local"
+                # No clients available
+                raise RuntimeError("No LLM clients available")
         else:
             return self.current_mode
     
     def generate_response(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
-        """Generate response using the appropriate LLM"""
-        effective_mode = self.get_effective_mode()
-        
-        if effective_mode == "openai" and self.openai_client:
-            return self._generate_with_openai(messages, **kwargs)
-        elif effective_mode == "local" and self.local_client:
-            return self._generate_with_local(messages, **kwargs)
-        else:
-            # Fallback to available client
-            if self.openai_client:
+        """Generate response using the appropriate LLM with automatic fallback"""
+        try:
+            effective_mode = self.get_effective_mode()
+            
+            if effective_mode == "openai" and self.openai_client:
                 return self._generate_with_openai(messages, **kwargs)
-            elif self.local_client:
-                return self._generate_with_local(messages, **kwargs)
+            elif effective_mode == "ollama" and self.ollama_client:
+                return self._generate_with_ollama(messages, **kwargs)
             else:
-                raise RuntimeError("No LLM client available")
+                # Fallback to available client
+                if self.openai_client:
+                    logger.info("Falling back to OpenAI")
+                    return self._generate_with_openai(messages, **kwargs)
+                elif self.ollama_client:
+                    logger.info("Falling back to Ollama")
+                    return self._generate_with_ollama(messages, **kwargs)
+                else:
+                    raise RuntimeError("No LLM client available")
+        except Exception as e:
+            logger.error(f"Primary LLM failed: {e}")
+            # Try fallback
+            if effective_mode == "openai" and self.ollama_client:
+                logger.info("OpenAI failed, falling back to Ollama")
+                return self._generate_with_ollama(messages, **kwargs)
+            elif effective_mode == "ollama" and self.openai_client:
+                logger.info("Ollama failed, falling back to OpenAI")
+                return self._generate_with_openai(messages, **kwargs)
+            else:
+                raise e
     
     def _generate_with_openai(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
         """Generate response using OpenAI"""
         try:
             response = self.openai_client.chat.completions.create(
-                model=kwargs.get("model", "gpt-3.5-turbo"),
+                model=kwargs.get("model", self.openai_model),
                 messages=messages,
                 max_tokens=kwargs.get("max_tokens", 300),
                 temperature=kwargs.get("temperature", 0.1)
@@ -108,16 +140,16 @@ class LLMManager:
                     "completion_tokens": response.usage.completion_tokens if response.usage else 0,
                     "total_tokens": response.usage.total_tokens if response.usage else 0
                 },
-                "model_used": "openai"
+                "model_used": f"openai:{self.openai_model}"
             }
         except Exception as e:
             logger.error(f"OpenAI generation failed: {e}")
             raise e
     
-    def _generate_with_local(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
-        """Generate response using local LLM"""
+    def _generate_with_ollama(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
+        """Generate response using Ollama"""
         try:
-            response = self.local_client.generate_response(
+            response = self.ollama_client.generate_response(
                 messages=messages,
                 max_tokens=kwargs.get("max_tokens", 300),
                 temperature=kwargs.get("temperature", 0.1)
@@ -126,22 +158,30 @@ class LLMManager:
             return {
                 "content": response["content"],
                 "usage": response["usage"],
-                "model_used": "local"
+                "model_used": f"ollama:{self.ollama_model}"
             }
         except Exception as e:
-            logger.error(f"Local LLM generation failed: {e}")
+            logger.error(f"Ollama generation failed: {e}")
             raise e
     
     
     def get_status(self) -> Dict[str, Any]:
         """Get current status of all LLM clients"""
+        ollama_status = {}
+        if self.ollama_client:
+            ollama_status = self.ollama_client.test_connection()
+        
         return {
             "current_mode": self.current_mode,
             "effective_mode": self.get_effective_mode(),
             "openai_available": self.openai_client is not None,
-            "local_available": self.local_client is not None,
+            "openai_model": self.openai_model,
+            "ollama_available": self.ollama_client is not None,
+            "ollama_model": self.ollama_model,
+            "ollama_status": ollama_status,
             "internet_available": check_internet_connection(),
-            "openai_accessible": check_openai_availability() if self.openai_client else False
+            "openai_accessible": check_openai_availability() if self.openai_client else False,
+            "available_modes": self.get_available_modes()
         }
 
 # Global manager instance
