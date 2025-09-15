@@ -1,10 +1,10 @@
 # Local LLM Setup Guide
 
-This guide explains how to run the project with a local LLM (e.g., Llama 7B) instead of OpenAI.
+This guide explains how to run the project with a local Llama 7B model instead of OpenAI.
 
 ## 🚀 Quick Start
 
-### 1. Install Dependencies
+### 1. Install Required Packages
 
 ```bash
 pip install -r requirements.txt
@@ -12,10 +12,10 @@ pip install -r requirements.txt
 
 ### 2. Model Configuration
 
-Configure the model in `config.py`:
+Configure model settings in `config.py`:
 
 ```python
-# Default model (small & fast)
+# Default model (small and fast)
 LLM_MODEL_NAME = "microsoft/DialoGPT-medium"
 
 # For Llama 7B (larger, better quality)
@@ -28,7 +28,7 @@ LLM_MODEL_NAME = "microsoft/DialoGPT-medium"
 python test_local_llm.py
 ```
 
-### 4. Run the App
+### 4. Run the Application
 
 ```bash
 streamlit run app/ui/streamlit_app.py
@@ -40,13 +40,13 @@ streamlit run app/ui/streamlit_app.py
 - `microsoft/DialoGPT-small` (varsayılan fallback)
 - `microsoft/DialoGPT-medium`
 
-### Llama Models (Better performance, more RAM)
+### Llama Models (Better quality, higher RAM)
 - `meta-llama/Llama-2-7b-chat-hf` (önerilen)
 - `meta-llama/Llama-2-7b-hf`
 
 ## ⚙️ Configuration Options
 
-In `config.py` you may set:
+You can adjust the following settings in `config.py`:
 
 ```python
 # LLM Model
@@ -64,15 +64,15 @@ DATABASE_PATH = "app/db/demo.sqlite"
 
 ## 🔧 System Requirements
 
-### Minimum
-- **RAM**: 8GB (for DialoGPT)
-- **Disk**: 2GB free
+### Minimum Requirements
+- **RAM**: 8GB (DialoGPT için)
+- **Disk**: 2GB boş alan
 - **Python**: 3.8+
 
-### Recommended (Llama 7B)
+### Recommended (for Llama 7B)
 - **RAM**: 16GB+
 - **GPU**: NVIDIA GPU (8GB+ VRAM)
-- **Disk**: 10GB+
+- **Disk**: 10GB+ boş alan
 
 ## 🐛 Troubleshooting
 
@@ -99,23 +99,23 @@ LLM_MODEL_NAME = "microsoft/DialoGPT-small"
 
 ## 📊 Performance Comparison
 
-| Model | Boyut | RAM | Hız | Kalite |
-|-------|-------|-----|-----|--------|
-| DialoGPT-small | ~300MB | 2GB | Çok Hızlı | Orta |
-| DialoGPT-medium | ~1.5GB | 4GB | Hızlı | İyi |
-| Llama-2-7b | ~13GB | 16GB | Yavaş | Çok İyi |
+| Model | Size | RAM | Speed | Quality |
+|-------|------|-----|-------|---------|
+| DialoGPT-small | ~300MB | 2GB | Very Fast | Medium |
+| DialoGPT-medium | ~1.5GB | 4GB | Fast | Good |
+| Llama-2-7b | ~13GB | 16GB | Slow | Very Good |
 
 ## 🔄 Switching from OpenAI
 
-Project can run fully local:
-- ✅ No OpenAI API key
+The project can operate fully locally:
+- ✅ No OpenAI API key required
 - ✅ No internet required
-- ✅ Data stays on device
-- ✅ No API cost
+- ✅ Data security (local processing)
+- ✅ Zero usage cost
 
 ## 📝 Notes
 
-- First run downloads the model (requires internet)
+- The model will be downloaded on first run (requires internet)
 - Models are cached for faster subsequent runs
-- Uses GPU automatically if available
-- Works on CPU too (slower)
+- GPU is used automatically if available
+- CPU-only works but will be slower

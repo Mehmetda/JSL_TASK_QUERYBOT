@@ -94,34 +94,43 @@ class LLMManager:
     
     def generate_response(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
         """Generate response using the appropriate LLM with automatic fallback"""
+        mode = None
         try:
-            effective_mode = self.get_effective_mode()
-            
-            if effective_mode == "openai" and self.openai_client:
+            mode = self.get_effective_mode()
+            if mode == "openai" and self.openai_client:
                 return self._generate_with_openai(messages, **kwargs)
-            elif effective_mode == "ollama" and self.ollama_client:
+            if mode == "ollama" and self.ollama_client:
                 return self._generate_with_ollama(messages, **kwargs)
-            else:
-                # Fallback to available client
-                if self.openai_client:
-                    logger.info("Falling back to OpenAI")
-                    return self._generate_with_openai(messages, **kwargs)
-                elif self.ollama_client:
-                    logger.info("Falling back to Ollama")
-                    return self._generate_with_ollama(messages, **kwargs)
-                else:
-                    raise RuntimeError("No LLM client available")
+            # If we get here, try whichever client exists
+            if self.openai_client:
+                logger.info("Falling back to OpenAI")
+                return self._generate_with_openai(messages, **kwargs)
+            if self.ollama_client:
+                logger.info("Falling back to Ollama")
+                return self._generate_with_ollama(messages, **kwargs)
+            raise RuntimeError("No LLM client available")
         except Exception as e:
             logger.error(f"Primary LLM failed: {e}")
-            # Try fallback
-            if effective_mode == "openai" and self.ollama_client:
+            # Try opposite client if available
+            if mode == "openai" and self.ollama_client:
                 logger.info("OpenAI failed, falling back to Ollama")
                 return self._generate_with_ollama(messages, **kwargs)
-            elif effective_mode == "ollama" and self.openai_client:
+            if mode == "ollama" and self.openai_client:
                 logger.info("Ollama failed, falling back to OpenAI")
                 return self._generate_with_openai(messages, **kwargs)
-            else:
-                raise e
+            # Last chance: try any available
+            if self.ollama_client:
+                try:
+                    return self._generate_with_ollama(messages, **kwargs)
+                except Exception:
+                    pass
+            if self.openai_client:
+                try:
+                    return self._generate_with_openai(messages, **kwargs)
+                except Exception:
+                    pass
+            # Nothing worked
+            raise RuntimeError("No LLM clients available")
     
     def _generate_with_openai(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
         """Generate response using OpenAI"""

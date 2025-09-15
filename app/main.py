@@ -35,6 +35,37 @@ except Exception as e:
     logger.info("Continuing with fallback model...")
 
 
+def _normalize_sql_table_names(sql: str) -> str:
+    """Case-insensitive normalization of common table-name typos/aliases."""
+    if not sql:
+        return sql
+    import re
+    mappings = {
+        "json_admissionss": "json_admissions",
+        "json_admission": "json_admissions",
+        "json_patient": "json_patients",
+        "json_provider": "json_providers",
+        "json_transfer": "json_transfers",
+        "json_careunit": "json_careunits",
+        "json_labs": "json_lab",
+        "json_diagnosis": "json_diagnoses",
+        "json_insurances": "json_insurance",
+        # generic aliases
+        "admissions": "json_admissions",
+        "patients": "json_patients",
+        "providers": "json_providers",
+        "transfers": "json_transfers",
+        "careunits": "json_careunits",
+        "diagnoses": "json_diagnoses",
+        "insurance": "json_insurance",
+        "lab": "json_lab",
+    }
+    normalized = sql
+    for wrong, right in mappings.items():
+        pattern = r"\b" + re.escape(wrong) + r"\b"
+        normalized = re.sub(pattern, right, normalized, flags=re.IGNORECASE)
+    return normalized
+
 def extract_tables_from_sql(sql: str) -> list:
     """Extract table names from SQL query"""
     if not sql:
@@ -196,6 +227,9 @@ def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResp
             sql_usage = {}
             logger.error(f"SQL generation failed: {sql_response.error}")
         
+        # Normalize SQL immediately after generation (defensive)
+        sql = _normalize_sql_table_names(sql)
+
         # Log SQL generation
         structured_logger.log_sql_generation(
             trace_id, question, sql, "local", 
@@ -234,6 +268,24 @@ def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResp
             )
             return blocked_response.model_dump()
         
+        # Final defensive normalization for common table typos before validation
+        typo_normalizations = {
+            "json_admissionss": "json_admissions",
+            "json_admission": "json_admissions",
+            "json_patientss": "json_patients",
+            "json_patient": "json_patients",
+            "json_provider": "json_providers",
+            "json_transfer": "json_transfers",
+            "json_careunit": "json_careunits",
+            "json_labs": "json_lab",
+            "json_diagnosis": "json_diagnoses",
+            "json_insurances": "json_insurance",
+            # common column typos
+            "json_insurance": "insurance",
+        }
+        for wrong, right in typo_normalizations.items():
+            sql = sql.replace(wrong, right)
+
         # Validate SQL against allowlist
         logger.info("Validating SQL against allowlist")
         is_valid, error_message, security_info = security_manager.validate_query(sql)
@@ -289,7 +341,7 @@ def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResp
                 session_id=request.session_id if request else None
             )
             if retry_response.success:
-                sql = retry_response.result.get("sql", "")
+                sql = _normalize_sql_table_names(retry_response.result.get("sql", ""))
             else:
                 sql = ""
             validation_result = validate_sql(conn, sql)
@@ -324,7 +376,8 @@ def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResp
                 )
                 return failed_validation_response.model_dump()
         
-        # Execute SQL with timing
+        # Execute SQL with timing (normalize one last time before exec)
+        sql = _normalize_sql_table_names(sql)
         logger.info("Executing SQL")
         t0 = time.perf_counter()
         rows, meta = execute_sql(conn, sql)

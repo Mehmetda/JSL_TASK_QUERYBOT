@@ -75,7 +75,8 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
         if internet_available:
-            st.success("🌐 Internet: Connected")
+            # Use shorter word to avoid awkward wrap
+            st.success("🌐 Internet: Online")
         else:
             st.error("🌐 Internet: Disconnected")
     
@@ -86,27 +87,20 @@ with st.sidebar:
             st.error("🔑 OpenAI: Unavailable")
     
     # LLM Mode Selection
+    # Always show the three modes in the UI for clarity
     available_modes = llm_manager.get_available_modes()
-    
-    if "auto" in available_modes:
-        mode_options = ["auto", "openai", "ollama"]
-        mode_labels = {
-            "auto": "🔄 Auto (Internet → Local)",
-            "openai": "🔑 OpenAI Only",
-            "ollama": "🏠 Local Only"
-        }
-    else:
-        mode_options = available_modes
-        mode_labels = {
-            "openai": "🔑 OpenAI",
-            "ollama": "🏠 Local"
-        }
+    mode_options = ["auto", "openai", "ollama"]
+    mode_labels = {
+        "auto": "🔄 Auto (Internet → Local)",
+        "openai": "🔑 OpenAI Only",
+        "ollama": "🏠 Local Only"
+    }
     
     selected_mode = st.radio(
         "Choose LLM Mode:",
         options=mode_options,
         format_func=lambda x: mode_labels.get(x, x),
-        index=0 if "auto" in mode_options else 0
+        index=0
     )
     
     # Update LLM mode
@@ -123,6 +117,10 @@ with st.sidebar:
         st.info("🎯 Currently using: OpenAI")
     elif effective_mode == "ollama":
         st.info("🎯 Currently using: Local LLM")
+    
+    # If user selected local but local runtime not detected, inform gracefully
+    if selected_mode == "ollama" and not local_available:
+        st.warning("Local LLM runtime (Ollama) not detected. Please start Ollama or install it, otherwise fallback may occur.")
     
     # (Removed LLM Status Details expander per request)
     

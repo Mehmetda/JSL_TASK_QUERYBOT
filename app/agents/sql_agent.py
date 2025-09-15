@@ -32,8 +32,8 @@ class SQLAgent(BaseAgent):
         super().__init__("SQLAgent", config)
         
         # SQL-specific configuration
-        self.default_top_k = self.config.get("top_k", 3)
-        self.default_language = self.config.get("language", "en")  # English by default
+        self.default_top_k = self.config.get("top_k", 5)
+        self.default_language = self.config.get("language", "tr")
         self.max_sql_length = self.config.get("max_sql_length", 1000)
         
         # SQL generation statistics
@@ -151,10 +151,11 @@ Important Guidelines:
 - Handle multilingual text properly in queries
 - Focus on medical domain entities and relationships
 - Maximum SQL length: {self.max_sql_length} characters
+- Generate a single valid SQLite SELECT statement only. No semicolons. Do not use MySQL functions like DATE_SUB/INTERVAL. Use SQLite date/time (date('now','-X days'), strftime, julianday).
 
 Question: {context.question}
 
-Generate SQL query:"""
+Few-shot Examples:\n\n1) Example:\nUser: How many admissions are there?\nSQL:\nSELECT COUNT(*) AS total_admissions\nFROM json_admissions\n\n2) Example:\nUser: Admissions per insurance type sorted by count desc\nSQL:\nSELECT insurance, COUNT(*) AS admissions_count\nFROM json_admissions\nGROUP BY insurance\nORDER BY admissions_count DESC\n\nNow, generate SQL query for the user's question:"""
     
     def _extract_and_clean_sql(self, raw_sql: str) -> str:
         """
@@ -178,11 +179,36 @@ Generate SQL query:"""
         if raw_sql.endswith("```"):
             raw_sql = raw_sql[:-3]
         
+        text = raw_sql.strip()
+
+        # If the model included prose, grab from the first SELECT onwards
+        lowered = text.lower()
+        if "select" in lowered:
+            idx = lowered.find("select")
+            text = text[idx:]
+
         # Extract only the first SQL statement (before semicolon)
-        sql_query = raw_sql.strip()
+        sql_query = text.strip()
         if ';' in sql_query:
             sql_query = sql_query.split(';')[0].strip()
         
+        # Common table-name normalizations to pass allowlist
+        replacements = {
+            "json_admission": "json_admissions",
+            "json_admissionss": "json_admissions",
+            "json_patientss": "json_patients",
+            "json_patient": "json_patients",
+            "json_provider": "json_providers",
+            "json_transfer": "json_transfers",
+            # common column typos
+            "json_insurance": "insurance",
+        }
+        # Case-insensitive replacement for robustness
+        import re
+        for wrong, right in replacements.items():
+            pattern = r"\b" + re.escape(wrong) + r"\b"
+            sql_query = re.sub(pattern, right, sql_query, flags=re.IGNORECASE)
+
         # Limit SQL length
         if len(sql_query) > self.max_sql_length:
             sql_query = sql_query[:self.max_sql_length]
@@ -202,6 +228,12 @@ Generate SQL query:"""
                 if self._sql_generation_count > 0 else 0.0
             )
         }
+
+    def get_agent_info(self) -> Dict[str, Any]:
+        """Override to include SQL-specific stats in performance_stats"""
+        info = super().get_agent_info()
+        info["performance_stats"] = self.get_sql_statistics()
+        return info
     
     def generate_sql(self, question: str, **kwargs) -> AgentResponse:
         """

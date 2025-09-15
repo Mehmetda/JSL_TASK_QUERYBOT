@@ -20,22 +20,6 @@ A lightweight, production-oriented Natural Language → SQL → Answer system wi
 
 ---
 
-## What's New
-
-- NER-enhanced hybrid RAG integrated into `SQLAgent` flow for better schema retrieval
-- Modular 3-layer agent architecture: `BaseAgent` + `SQLAgent` + prompt helpers
-- Security hardening:
-  - Table allow-list alias mapping (e.g., admissions → json_admissions)
-  - Hard guard: Only `SELECT` statements allowed (blocks DML early)
-  - SQLite validator updated to avoid duplicate LIMIT during syntax check
-- Expanded tests:
-  - Edge-case integration tests (`tests/test_edge_cases.py`)
-  - English system prompt check (`tests/test_english_system_prompts.py`)
-
-These changes improve reliability, security and determinism, and make the agent easier to extend.
-
----
-
 ## Repository Layout (selected)
 
 ```

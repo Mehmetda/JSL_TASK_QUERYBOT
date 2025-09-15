@@ -43,6 +43,21 @@ class TableAllowlist:
             "careunits": "json_careunits",
             "careunit": "json_careunits",
         }
+
+        # Common typos → canonical table mapping (defensive normalization)
+        # Example: "json_admissionss" → "json_admissions"
+        self._typo_to_canonical = {
+            "json_admission": "json_admissions",
+            "json_admissionss": "json_admissions",
+            "json_patientss": "json_patients",
+            "json_patient": "json_patients",
+            "json_provider": "json_providers",
+            "json_transfer": "json_transfers",
+            "json_careunit": "json_careunits",
+            "json_labs": "json_lab",
+            "json_diagnosis": "json_diagnoses",
+            "json_insurances": "json_insurance",
+        }
     
     def _load_from_config(self) -> List[str]:
         """Load allowed tables from configuration"""
@@ -80,7 +95,9 @@ class TableAllowlist:
         """
         # Normalize table name (remove quotes, convert to lowercase)
         normalized_name = table_name.strip().strip('"').strip("'").lower()
-        # Map common generic names to canonical allowed table names
+        # First, fix common typos
+        normalized_name = self._typo_to_canonical.get(normalized_name, normalized_name)
+        # Then, map common generic names to canonical allowed table names
         canonical_name = self._generic_to_canonical.get(normalized_name, normalized_name)
         
         # Check if table is in allowlist
@@ -204,7 +221,10 @@ class TableAllowlistManager:
             suggestions = []
             for t in blocked_tables:
                 n = t.strip().strip('"').strip("'").lower()
-                sugg = self.allowlist._generic_to_canonical.get(n)
+                sugg = (
+                    self.allowlist._typo_to_canonical.get(n)
+                    or self.allowlist._generic_to_canonical.get(n)
+                )
                 if sugg:
                     suggestions.append(f"{t}→{sugg}")
             suggestion_text = f" Suggestions: {', '.join(suggestions)}." if suggestions else ""

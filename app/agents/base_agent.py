@@ -32,7 +32,7 @@ class AgentContext:
     question: str
     user_id: Optional[str] = None
     session_id: Optional[str] = None
-    language: str = "en"
+    language: str = "tr"
     max_tokens: int = 300
     temperature: float = 0.1
     additional_context: Optional[Dict[str, Any]] = None
@@ -141,7 +141,8 @@ class BaseAgent(ABC):
                 "success_rate": 0.0,
                 "average_execution_time_ms": 0.0,
                 "min_execution_time_ms": 0.0,
-                "max_execution_time_ms": 0.0
+                "max_execution_time_ms": 0.0,
+                "sql_generation_count": 0,
             }
         
         total_executions = self._success_count + self._error_count
@@ -152,7 +153,8 @@ class BaseAgent(ABC):
             "success_rate": success_rate,
             "average_execution_time_ms": sum(self._execution_times) / len(self._execution_times),
             "min_execution_time_ms": min(self._execution_times),
-            "max_execution_time_ms": max(self._execution_times)
+            "max_execution_time_ms": max(self._execution_times),
+            "sql_generation_count": total_executions,
         }
     
     def execute(self, context: AgentContext) -> AgentResponse:
