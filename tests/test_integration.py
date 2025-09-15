@@ -21,10 +21,10 @@ def test_complete_pipeline():
     print("Testing complete pipeline...")
     
     test_questions = [
-        "Kaç tane hasta var?",
-        "Cinsiyete göre hasta dağılımı nedir?",
-        "En çok hasta kabul eden doktorlar kimler?",
-        "Yatış tiplerine göre dağılım nedir?"
+        "How many patients are there?",
+        "What is the gender distribution of patients?",
+        "Which doctors have the most patients?",
+        "What is the distribution by admission types?"
     ]
     
     manager = get_llm_manager()
@@ -66,10 +66,10 @@ def test_data_modification_blocking():
     print("\nTesting data modification blocking...")
     
     dangerous_questions = [
-        "Hasta tablosunu sil",
-        "Yeni hasta ekle",
-        "Hasta bilgilerini güncelle",
-        "Tabloyu temizle"
+        "Delete patient table",
+        "Add new patient",
+        "Update patient information",
+        "Clear the table"
     ]
     
     for question in dangerous_questions:
@@ -108,7 +108,7 @@ def test_llm_mode_switching():
             manager.set_mode(mode)
             print(f"Testing mode: {mode}")
             
-            result = run_query_pipeline("Kaç tane hasta var?")
+            result = run_query_pipeline("How many patients are there?")
             
             # Should work regardless of mode
             assert result["sql"].strip() != ""

@@ -55,8 +55,8 @@ def test_llm_generation_modes():
     
     manager = get_llm_manager()
     messages = [
-        {"role": "system", "content": "Sen yardımcı bir asistansın."},
-        {"role": "user", "content": "Merhaba, nasılsın?"}
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Hello, how are you?"}
     ]
     
     # Test each available mode

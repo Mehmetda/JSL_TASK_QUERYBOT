@@ -29,13 +29,13 @@ def test_query_models():
     try:
         # Test QueryRequest
         request = QueryRequest(
-            question="Kaç tane hasta var?",
+            question="How many patients are there?",
             user_id="user123",
             session_id="session456",
             trace_id="trace789",
             llm_mode=LLMMode.AUTO
         )
-        assert request.question == "Kaç tane hasta var?"
+        assert request.question == "How many patients are there?"
         assert request.user_id == "user123"
         print("✅ QueryRequest model works")
         
@@ -89,7 +89,7 @@ def test_query_models():
         # Test QueryResponse
         response = QueryResponse(
             sql="SELECT COUNT(*) FROM json_patients",
-            answer="1 hasta bulunmaktadır.",
+            answer="1 patient found.",
             meta=metadata
         )
         assert response.success == True
@@ -110,7 +110,7 @@ def test_llm_models():
         # Test Message
         message = Message(
             role=MessageRole.USER,
-            content="Merhaba, nasılsın?"
+            content="Hello, how are you?"
         )
         assert message.role == MessageRole.USER
         print("✅ Message model works")

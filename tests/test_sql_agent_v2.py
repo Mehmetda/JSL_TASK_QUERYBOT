@@ -29,8 +29,8 @@ class TestSQLAgent(unittest.TestCase):
         """Set up test fixtures"""
         self.sql_agent = SQLAgent()
         self.valid_context = AgentContext(
-            question="Cinsiyete göre hasta sayıları nedir?",
-            language="tr",
+            question="What are the patient counts by gender?",
+            language="en",
             max_tokens=300,
             temperature=0.1
         )

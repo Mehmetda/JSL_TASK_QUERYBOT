@@ -201,6 +201,38 @@ def run_query_pipeline(question: str, request: QueryRequest = None) -> QueryResp
             trace_id, question, sql, "local", 
             sql_usage.get("total_tokens", 0), sql_generation_time
         )
+
+        # Hard guard: Only SELECT statements are allowed
+        if not sql.strip().lower().startswith("select"):
+            logger.warning("Non-SELECT SQL detected; blocking operation")
+            execution_time_ms = int((time.perf_counter() - start_time) * 1000)
+            blocked_response = QueryResponse(
+                sql=sql,
+                answer="Access denied: Only SELECT queries are allowed.",
+                meta=QueryMetadata(
+                    results={},
+                    validation=ValidationInfo(
+                        is_valid=False,
+                        error="Only SELECT queries are allowed.",
+                        sql_safety=ValidationStatus.FAILED,
+                        retried=False
+                    ),
+                    database=DatabaseInfo(
+                        query_type=QueryType.OTHER,
+                        complexity=ComplexityLevel.SIMPLE
+                    ),
+                    performance=PerformanceInfo(
+                        rows_returned=0,
+                        columns_returned=0,
+                        data_size_estimate="0 characters",
+                        execution_ms=0
+                    ),
+                    security=security_manager.get_security_info()
+                ),
+                success=False,
+                error="Only SELECT queries are allowed."
+            )
+            return blocked_response.model_dump()
         
         # Validate SQL against allowlist
         logger.info("Validating SQL against allowlist")

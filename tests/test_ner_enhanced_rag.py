@@ -181,10 +181,10 @@ class TestNEREnhancedRAG(unittest.TestCase):
     
     def test_language_support(self):
         """Test language support for NER processing"""
-        # Test Turkish
-        tr_question = "hasta sayıları nedir?"
-        tr_result = get_ner_enhanced_hybrid_schema_snippets(
-            self.conn, tr_question, top_k=3, language_code="tr"
+        # Test English
+        en_question = "What are the patient counts?"
+        en_result = get_ner_enhanced_hybrid_schema_snippets(
+            self.conn, en_question, top_k=3, language_code="en"
         )
         self.assertIsNotNone(tr_result)
         

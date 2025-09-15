@@ -24,10 +24,10 @@ from app.agents.system_prompt import (
 
 
 QUESTIONS = [
-    "Cinsiyete göre hasta sayıları nedir?",
-    "Yatış tiplerine göre dağılım nedir?",
-    "Bakım birimlerine göre transfer sayıları?",
-    "En çok hasta kabul eden doktorlar?",
+    "What are the patient counts by gender?",
+    "What is the distribution by admission types?",
+    "What are the transfer counts by care units?",
+    "Which doctors have the most patients?",
 ]
 
 

@@ -28,10 +28,10 @@ class TestAgentIntegration(unittest.TestCase):
         """Set up test fixtures"""
         self.sql_agent = SQLAgent()
         self.test_questions = [
-            "Cinsiyete göre hasta sayıları nedir?",
-            "Yatış tiplerine göre dağılım nedir?",
-            "subject_id 12345 olan hastanın yatış bilgileri?",
-            "hadm_id 67890 ile ilgili transfer kayıtları?"
+            "What are the patient counts by gender?",
+            "What is the distribution by admission types?",
+            "What are the admission details for patient with subject_id 12345?",
+            "What are the transfer records related to hadm_id 67890?"
         ]
     
     @patch('app.agents.sql_agent_v2.get_connection')
@@ -45,7 +45,7 @@ class TestAgentIntegration(unittest.TestCase):
         # Mock realistic schema snippets
         mock_schema.return_value = """
 ## Extracted Entities and Domain Terms:
-Domain terms: hasta, cinsiyet
+Domain terms: patient, gender
 
 Table: json_admissions, Column: gender (similarity: 0.850)
 Column: gender (TEXT) in table json_admissions
@@ -56,7 +56,7 @@ Table: json_admissions with columns: id, hadm_id, subject_id, admittime, dischti
         
         # Mock realistic LLM response
         mock_llm_manager.generate_response.return_value = {
-            "content": "SELECT gender, COUNT(*) as hasta_sayisi FROM json_admissions GROUP BY gender ORDER BY hasta_sayisi DESC",
+            "content": "SELECT gender, COUNT(*) as patient_count FROM json_admissions GROUP BY gender ORDER BY patient_count DESC",
             "usage": {"prompt_tokens": 150, "completion_tokens": 25, "total_tokens": 175}
         }
         
@@ -104,8 +104,8 @@ Table: json_admissions with columns: id, hadm_id, subject_id, admittime, dischti
         
         # Test with ID-based question
         context = AgentContext(
-            question="subject_id 12345 olan hastanın yatış bilgileri?",
-            language="tr"
+            question="What are the admission details for patient with subject_id 12345?",
+            language="en"
         )
         
         response = self.sql_agent.execute(context)
@@ -223,10 +223,10 @@ Table: json_admissions with columns: id, hadm_id, subject_id, admittime, dischti
             "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
         }
         
-        # Test Turkish
-        tr_context = AgentContext(question="Türkçe soru", language="tr")
-        tr_response = self.sql_agent.execute(tr_context)
-        self.assertTrue(tr_response.success)
+        # Test English
+        en_context = AgentContext(question="English question", language="en")
+        en_response = self.sql_agent.execute(en_context)
+        self.assertTrue(en_response.success)
         
         # Test English
         en_context = AgentContext(question="English question", language="en")

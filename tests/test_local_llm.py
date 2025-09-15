@@ -34,8 +34,8 @@ def test_llm_generation():
         
         # Test simple generation
         messages = [
-            {"role": "system", "content": "Sen yardımcı bir asistansın."},
-            {"role": "user", "content": "Merhaba, nasılsın?"}
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello, how are you?"}
         ]
         
         response = client.generate_response(messages, max_tokens=50, temperature=0.1)
@@ -57,7 +57,7 @@ def test_embedding():
         model_name = get_embedding_model()
         model = SentenceTransformer(model_name)
         
-        texts = ["Bu bir test metnidir", "Another test text"]
+        texts = ["This is a test text", "Another test text"]
         embeddings = model.encode(texts)
         
         print(f"Embedding generation successful")
@@ -117,7 +117,7 @@ def test_sql_agent():
         from app.db.connection import get_connection
         
         conn = get_connection()
-        question = "Kaç tane hasta var?"
+        question = "How many patients are there?"
         
         sql = generate_sql(question, conn)
         print(f"SQL generation successful")

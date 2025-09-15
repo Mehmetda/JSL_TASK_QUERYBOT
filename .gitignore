@@ -29,3 +29,7 @@ Thumbs.db
 
 # Logs
 *.log
+.env
+logs/
+app/db/demo.sqlite
+__pycache__/

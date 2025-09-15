@@ -23,6 +23,26 @@ class TableAllowlist:
         self.blocked_operations = set()
         
         logger.info(f"Table allowlist initialized with {len(self.allowed_tables)} tables")
+
+        # Common alias → canonical table mapping to reduce false blocks
+        # Example: "admissions" → "json_admissions"
+        self._generic_to_canonical = {
+            "patients": "json_patients",
+            "patient": "json_patients",
+            "admissions": "json_admissions",
+            "admission": "json_admissions",
+            "providers": "json_providers",
+            "provider": "json_providers",
+            "transfers": "json_transfers",
+            "transfer": "json_transfers",
+            "lab": "json_lab",
+            "labs": "json_lab",
+            "diagnoses": "json_diagnoses",
+            "diagnosis": "json_diagnoses",
+            "insurance": "json_insurance",
+            "careunits": "json_careunits",
+            "careunit": "json_careunits",
+        }
     
     def _load_from_config(self) -> List[str]:
         """Load allowed tables from configuration"""
@@ -60,12 +80,20 @@ class TableAllowlist:
         """
         # Normalize table name (remove quotes, convert to lowercase)
         normalized_name = table_name.strip().strip('"').strip("'").lower()
+        # Map common generic names to canonical allowed table names
+        canonical_name = self._generic_to_canonical.get(normalized_name, normalized_name)
         
         # Check if table is in allowlist
-        is_allowed = normalized_name in self.allowed_tables
+        is_allowed = canonical_name in self.allowed_tables
         
         if not is_allowed:
-            logger.warning(f"Access denied to table: {table_name}")
+            # Provide suggestion if a canonical mapping exists but is not allowed
+            if normalized_name != canonical_name:
+                logger.warning(
+                    f"Access denied to table: {table_name}. Did you mean '{canonical_name}'?"
+                )
+            else:
+                logger.warning(f"Access denied to table: {table_name}")
             self.blocked_operations.add(f"table_access:{table_name}")
         
         return is_allowed
@@ -172,7 +200,18 @@ class TableAllowlistManager:
         if is_valid:
             error_message = ""
         else:
-            error_message = f"Access denied to tables: {', '.join(blocked_tables)}. Allowed tables: {', '.join(self.allowlist.get_allowed_tables())}"
+            # Try to include suggestions for common aliases
+            suggestions = []
+            for t in blocked_tables:
+                n = t.strip().strip('"').strip("'").lower()
+                sugg = self.allowlist._generic_to_canonical.get(n)
+                if sugg:
+                    suggestions.append(f"{t}→{sugg}")
+            suggestion_text = f" Suggestions: {', '.join(suggestions)}." if suggestions else ""
+            error_message = (
+                f"Access denied to tables: {', '.join(blocked_tables)}. "
+                f"Allowed tables: {', '.join(self.allowlist.get_allowed_tables())}." + suggestion_text
+            )
         
         security_info = self.allowlist.get_security_info()
         

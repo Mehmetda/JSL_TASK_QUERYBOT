@@ -31,8 +31,8 @@ def validate_sql(conn: sqlite3.Connection, sql: str) -> Dict[str, Any]:
         # Use EXPLAIN to check syntax
         cursor = conn.cursor()
         cursor.execute(f"EXPLAIN {sql}")
-        # Try to fetch one row to ensure it's executable
-        cursor.execute(f"{sql} LIMIT 1")
+        # Execute safely by wrapping in a subquery to avoid duplicating LIMIT
+        cursor.execute(f"SELECT 1 FROM ({sql}) LIMIT 1")
         cursor.fetchone()
         return {"is_valid": True, "error": None}
     except sqlite3.Error as e:
