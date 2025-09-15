@@ -1,127 +1,127 @@
 # LLM Switching Guide
 
-Bu rehber, Streamlit UI'daki LLM seçim özelliklerini açıklar.
+This guide explains the LLM selection options in the Streamlit UI.
 
-## 🤖 LLM Seçenekleri
+## 🤖 LLM Options
 
-### 1. 🔄 Auto Mode (Önerilen)
-- **Nasıl çalışır**: İnternet varsa OpenAI, yoksa Local LLM kullanır
-- **Avantajları**: Otomatik geçiş, en iyi performans
-- **Kullanım**: Varsayılan seçenek
+### 1. 🔄 Auto Mode (Recommended)
+- **How it works**: Uses OpenAI if online, otherwise Local LLM
+- **Pros**: Automatic fallback, best overall
+- **Usage**: Default option
 
 ### 2. 🔑 OpenAI Only
-- **Nasıl çalışır**: Sadece OpenAI API kullanır
-- **Avantajları**: En iyi kalite, hızlı
-- **Gereksinimler**: İnternet + OpenAI API key
+- **How it works**: Uses only OpenAI API
+- **Pros**: Best quality, fast
+- **Requires**: Internet + OpenAI API key
 
 ### 3. 🏠 Local Only
-- **Nasıl çalışır**: Sadece local LLM kullanır
-- **Avantajları**: Offline çalışır, veri güvenliği
-- **Gereksinimler**: Yeterli RAM (8GB+)
+- **How it works**: Uses only local LLM
+- **Pros**: Works offline, data stays local
+- **Requires**: Enough RAM (8GB+)
 
-## 🎯 Kullanım Senaryoları
+## 🎯 Scenarios
 
-### Senaryo 1: Normal Kullanım
+### Scenario 1: Normal Use
 ```
-Seçim: Auto Mode
-Durum: İnternet var + OpenAI key var
-Sonuç: OpenAI kullanılır
-```
-
-### Senaryo 2: İnternet Kesintisi
-```
-Seçim: Auto Mode
-Durum: İnternet yok
-Sonuç: Local LLM kullanılır
+Choice: Auto Mode
+Status: Internet + OpenAI key available
+Result: Uses OpenAI
 ```
 
-### Senaryo 3: OpenAI Key Yok
+### Scenario 2: Internet Outage
 ```
-Seçim: Auto Mode
-Durum: İnternet var ama OpenAI key yok
-Sonuç: Local LLM kullanılır
-```
-
-### Senaryo 4: Offline Çalışma
-```
-Seçim: Local Only
-Durum: İnternet yok
-Sonuç: Local LLM kullanılır
+Choice: Auto Mode
+Status: Offline
+Result: Uses Local LLM
 ```
 
-## 🔧 Konfigürasyon
+### Scenario 3: No OpenAI Key
+```
+Choice: Auto Mode
+Status: Internet but no OpenAI key
+Result: Uses Local LLM
+```
+
+### Scenario 4: Work Offline
+```
+Choice: Local Only
+Status: Offline
+Result: Uses Local LLM
+```
+
+## 🔧 Configuration
 
 ### OpenAI API Key
 ```bash
-# .env dosyası oluşturun
+# Create a .env file
 echo "OPENAI_API_KEY=your_api_key_here" > .env
 ```
 
 ### Local LLM Model
 ```python
-# config.py dosyasında
-LLM_MODEL_NAME = "microsoft/DialoGPT-medium"  # Küçük model
-# LLM_MODEL_NAME = "meta-llama/Llama-2-7b-chat-hf"  # Büyük model
+# In config.py
+LLM_MODEL_NAME = "microsoft/DialoGPT-medium"  # Small model
+# LLM_MODEL_NAME = "meta-llama/Llama-2-7b-chat-hf"  # Large model
 ```
 
-## 📊 Durum Göstergeleri
+## 📊 Status Indicators
 
-### Sidebar'da Gösterilen Bilgiler:
-- 🌐 **Internet**: Bağlantı durumu
-- 🔑 **OpenAI**: API erişilebilirliği
-- 🎯 **Currently using**: Aktif LLM
+### In Sidebar:
+- 🌐 **Internet**: Connectivity
+- 🔑 **OpenAI**: API availability
+- 🎯 **Currently using**: Active LLM
 
-### Metadata'da Gösterilen Bilgiler:
-- **Selected Mode**: Kullanıcının seçtiği mod
-- **Effective Mode**: Gerçekte kullanılan mod
-- **Token Usage**: LLM kullanım istatistikleri
+### In Metadata:
+- **Selected Mode**: User selected mode
+- **Effective Mode**: Actually used mode
+- **Token Usage**: LLM usage stats
 
-## 🚀 Kurulum
+## 🚀 Setup
 
 ```bash
-# 1. Paketleri yükle
+# 1. Install packages
 pip install -r requirements.txt
 
-# 2. spaCy modellerini indir
+# 2. Download spaCy models
 python -m spacy download xx_ent_wiki_sm
 python -m spacy download en_core_web_sm
 
-# 3. Test et
+# 3. Test
 python test_local_llm.py
 
-# 4. Çalıştır
+# 4. Run
 streamlit run app/ui/streamlit_app.py
 ```
 
-## 🐛 Sorun Giderme
+## 🐛 Troubleshooting
 
-### OpenAI Kullanılamıyor
-- ✅ İnternet bağlantısını kontrol edin
-- ✅ OpenAI API key'inizi kontrol edin
-- ✅ Auto mode kullanın (otomatik local'a geçer)
+### OpenAI Unavailable
+- ✅ Check internet connectivity
+- ✅ Check OpenAI API key
+- ✅ Use Auto mode (falls back to local)
 
-### Local LLM Yüklenmiyor
-- ✅ Yeterli RAM olduğundan emin olun (8GB+)
-- ✅ Daha küçük model seçin (DialoGPT-small)
-- ✅ GPU kullanımını kapatın (config.py'de USE_GPU=False)
+### Local LLM Not Loading
+- ✅ Ensure enough RAM (8GB+)
+- ✅ Choose a smaller model (DialoGPT-small)
+- ✅ Disable GPU (USE_GPU=False in config.py)
 
-### Performans Sorunları
-- ✅ Local mode için daha küçük model kullanın
-- ✅ GPU varsa kullanın
-- ✅ Auto mode ile en iyi performansı alın
+### Performance Issues
+- ✅ Use a smaller model in Local mode
+- ✅ Use GPU if available
+- ✅ Prefer Auto mode for best overall
 
-## 💡 İpuçları
+## 💡 Tips
 
-1. **İlk kullanım**: Auto mode ile başlayın
-2. **Offline çalışma**: Local only mode kullanın
-3. **En iyi kalite**: OpenAI only mode kullanın
-4. **Güvenlik**: Local only mode kullanın
-5. **Performans**: Auto mode kullanın
+1. **First time**: Start with Auto mode
+2. **Offline**: Use Local Only
+3. **Best quality**: Use OpenAI Only
+4. **Security**: Use Local Only
+5. **Performance**: Use Auto mode
 
-## 📈 Performans Karşılaştırması
+## 📈 Performance Comparison
 
-| Mode | Hız | Kalite | Güvenlik | Maliyet |
-|------|-----|--------|----------|---------|
+| Mode | Speed | Quality | Security | Cost |
+|------|-------|---------|----------|------|
 | Auto | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
 | OpenAI | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐ | ⭐ |
 | Local | ⭐⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ |

@@ -1,103 +1,103 @@
 # Local LLM Setup Guide
 
-Bu rehber, projeyi OpenAI yerine local Llama 7B modeli ile çalıştırmak için gerekli adımları açıklar.
+This guide explains how to run the project with a local LLM (e.g., Llama 7B) instead of OpenAI.
 
-## 🚀 Hızlı Başlangıç
+## 🚀 Quick Start
 
-### 1. Gerekli Paketleri Yükleyin
+### 1. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Model Konfigürasyonu
+### 2. Model Configuration
 
-`config.py` dosyasında model ayarlarını yapabilirsiniz:
+Configure the model in `config.py`:
 
 ```python
-# Varsayılan model (küçük ve hızlı)
+# Default model (small & fast)
 LLM_MODEL_NAME = "microsoft/DialoGPT-medium"
 
-# Llama 7B modeli için (daha büyük, daha iyi performans)
+# For Llama 7B (larger, better quality)
 # LLM_MODEL_NAME = "meta-llama/Llama-2-7b-chat-hf"
 ```
 
-### 3. Uygulamayı Test Edin
+### 3. Test the Application
 
 ```bash
 python test_local_llm.py
 ```
 
-### 4. Uygulamayı Çalıştırın
+### 4. Run the App
 
 ```bash
 streamlit run app/ui/streamlit_app.py
 ```
 
-## 📋 Desteklenen Modeller
+## 📋 Supported Models
 
-### Küçük Modeller (Hızlı, az RAM)
+### Small Models (Fast, low RAM)
 - `microsoft/DialoGPT-small` (varsayılan fallback)
 - `microsoft/DialoGPT-medium`
 
-### Llama Modelleri (Daha iyi performans, daha fazla RAM)
+### Llama Models (Better performance, more RAM)
 - `meta-llama/Llama-2-7b-chat-hf` (önerilen)
 - `meta-llama/Llama-2-7b-hf`
 
-## ⚙️ Konfigürasyon Seçenekleri
+## ⚙️ Configuration Options
 
-`config.py` dosyasında aşağıdaki ayarları yapabilirsiniz:
+In `config.py` you may set:
 
 ```python
 # LLM Model
 LLM_MODEL_NAME = "meta-llama/Llama-2-7b-chat-hf"
 
-# Embedding Model (semantic search için)
+# Embedding Model (for semantic search)
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-# GPU kullanımı
-USE_GPU = True  # GPU varsa kullan
+# GPU usage
+USE_GPU = True  # use GPU if available
 
-# Veritabanı yolu
+# Database path
 DATABASE_PATH = "app/db/demo.sqlite"
 ```
 
-## 🔧 Sistem Gereksinimleri
+## 🔧 System Requirements
 
-### Minimum Gereksinimler
-- **RAM**: 8GB (DialoGPT için)
-- **Disk**: 2GB boş alan
+### Minimum
+- **RAM**: 8GB (for DialoGPT)
+- **Disk**: 2GB free
 - **Python**: 3.8+
 
-### Önerilen Gereksinimler (Llama 7B için)
+### Recommended (Llama 7B)
 - **RAM**: 16GB+
 - **GPU**: NVIDIA GPU (8GB+ VRAM)
-- **Disk**: 10GB+ boş alan
+- **Disk**: 10GB+
 
-## 🐛 Sorun Giderme
+## 🐛 Troubleshooting
 
-### Model Yükleme Hatası
+### Model Load Error
 ```bash
-# Cache'i temizle
+# Clear cache
 rm -rf ~/.cache/huggingface/
 
-# Tekrar dene
+# Retry
 python test_local_llm.py
 ```
 
-### GPU Kullanımı
+### GPU Usage
 ```python
-# config.py'de GPU'yu kapat
+# Disable GPU in config.py
 USE_GPU = False
 ```
 
-### Bellek Hatası
-Daha küçük bir model kullanın:
+### Out of Memory
+Use a smaller model:
 ```python
 LLM_MODEL_NAME = "microsoft/DialoGPT-small"
 ```
 
-## 📊 Performans Karşılaştırması
+## 📊 Performance Comparison
 
 | Model | Boyut | RAM | Hız | Kalite |
 |-------|-------|-----|-----|--------|
@@ -105,17 +105,17 @@ LLM_MODEL_NAME = "microsoft/DialoGPT-small"
 | DialoGPT-medium | ~1.5GB | 4GB | Hızlı | İyi |
 | Llama-2-7b | ~13GB | 16GB | Yavaş | Çok İyi |
 
-## 🔄 OpenAI'dan Geçiş
+## 🔄 Switching from OpenAI
 
-Proje artık tamamen local çalışır:
-- ✅ OpenAI API key gerekmez
-- ✅ İnternet bağlantısı gerekmez
-- ✅ Veri güvenliği (local processing)
-- ✅ Maliyet yok
+Project can run fully local:
+- ✅ No OpenAI API key
+- ✅ No internet required
+- ✅ Data stays on device
+- ✅ No API cost
 
-## 📝 Notlar
+## 📝 Notes
 
-- İlk çalıştırmada model indirilecektir (internet gerekir)
-- Model cache'lenir, sonraki çalıştırmalarda hızlı başlar
-- GPU varsa otomatik kullanılır
-- CPU'da da çalışır ama daha yavaş olur
+- First run downloads the model (requires internet)
+- Models are cached for faster subsequent runs
+- Uses GPU automatically if available
+- Works on CPU too (slower)
